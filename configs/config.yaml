@@ -1,0 +1,29 @@
+# basic information
+Corporation: hqx
+Project: RMB
+Develop:
+  group: algorithm
+  workers: Ycc, Jim
+
+# running configurations
+log:
+  log_dir: './logs/'    # ./logs/{data_time}.txt
+
+detect:
+  valid: True
+  port: 0
+  platform: pc          # pc(onnx) / rknn(rknn)
+  model_path: ''
+  imgsz: 640
+  obj_threshold: 0.3
+  nms_threshold: 0.5
+
+segment:
+  valid: False
+  port: 1
+  platform: pc
+  model_path: ''
+  imgsz: 640
+  obj_threshold: 0.3
+  nms_threshold: 0.5
+
