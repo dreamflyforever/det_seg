@@ -21,12 +21,12 @@ from utils.log import logger
 from concurrency.bus import BusWorker, ServiceId
 from concurrency.job_package import JobPkgBase
 from concurrency.thread_runner import ThreadMode
-from camera.capture import JobSharedImg
+from camera.realsense import JobSharedRealsenseImg
 
-import algorithm.utils.yolo_postprocess as yolo_pp
+import algorithm.utils.yolo_handle as yolo_handle
 
 
-class JobYOLOv5Result(JobPkgBase):
+class JobYOLOv5DetResult(JobPkgBase):
     """JobPkg of YOLOv5 detection results.
 
     Attributes:
@@ -53,44 +53,51 @@ class YOLOv5DetectWorker(BusWorker):
         max_det
     """
 
-    def __init__(self, weight: str, imgsz: Union[Union[List, Tuple], int],
+    def __init__(self, weight: str, imgsz: Union[Union[List, Tuple], int], cuda: bool = False,
                  iou_thresh: float = 0.5, conf_thresh: float = 0.5, max_det: int = 300, ):
-        super().__init__(ServiceId.DETECTOR, 'YOLOv5')
+        super().__init__(ServiceId.DETECTOR, 'YOLOv5Det')
         assert Path(weight).expanduser().exists(), weight
         assert 0 <= iou_thresh < 1, f'Invalid iou threshold {conf_thresh}, it must range [0, 1)'
         assert 0 <= conf_thresh < 1, f'Invalid confidence threshold {conf_thresh}, it must range [0, 1)'
 
         self.weight = str(Path(weight).expanduser())
         self.imgsz = (imgsz, imgsz) if isinstance(imgsz, int) else imgsz
+        self.cuda = cuda
         self.iou_thresh = iou_thresh
         self.conf_thresh = conf_thresh
         self.max_det = max_det
 
-        self.onnx, self.rknn = [weight.endswith(x) for x in ('.onnx', '.rknn')]
-        if not any((self.onnx, self.rknn)):
+        self.pt, self.onnx, self.rknn = [weight.endswith(x) for x in ('.pt', '.onnx', '.rknn')]
+        if not any((self.pt, self.onnx, self.rknn)):
             raise ValueError(f'Not supported weight file: {self.weight}')
 
     def _load_model(self) -> None:
-        if self.onnx:
-            logger.info(f'model format is onnx')
+        if self.pt:
+            logger.info(f'{self.fullname()}, model format is pytorch')
             logger.info(f'{self.fullname()}, start loading model: {self.weight}')
+            import torch
+            self.model = torch.load(self.weight)
 
+        elif self.onnx:
+            logger.info(f'{self.fullname()}, model format is onnx')
+            logger.info(f'{self.fullname()}, start loading model: {self.weight}')
             import onnxruntime as ort
-            self.model = ort.InferenceSession(self.weight, None)
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if self.cuda else ['CPUExecutionProvider']
+            self.model = ort.InferenceSession(self.weight, providers=providers)
             self.onnx_input = self.model.get_inputs()[0].name
             self.onnx_outputs = [o.name for o in self.model.get_outputs()]
 
         else:
-            logger.info(f'model format is rknn')
+            logger.info(f'{self.fullname()}, model format is rknn')
             logger.info(f'{self.fullname()}, start loading model: {self.weight}')
 
             from rknnlite.api import RKNNLite
             self.model = RKNNLite()
             ret = self.model.load_rknn(self.weight)
             if ret != 0:
-                logger.error(f'load RKNN model failed!')
+                logger.error(f'{self.fullname()}, load RKNN model failed!')
                 exit(ret)
-            logger.info(f'Init runtime environment successful')
+            logger.info(f'{self.fullname()}, Init runtime environment successful')
 
     def _warmup_model(self) -> None:
         assert self.model is not None, 'load model before warmup'
@@ -102,7 +109,9 @@ class YOLOv5DetectWorker(BusWorker):
         while cnt < 10:
             cnt += 1
             tick = time.time()
-            if self.onnx:
+            if self.pt:
+                self.model(img)
+            elif self.onnx:
                 self.model.run(self.onnx_outputs, {self.onnx_input: img})
             else:
                 self.model.inference(inputs=[img[0]])
@@ -125,7 +134,7 @@ class YOLOv5DetectWorker(BusWorker):
             return True
         if self.m_queueToWorker.empty():
             return True
-        job_img = cast(JobSharedImg, self.m_queueToWorker.get())
+        job_img = cast(JobSharedRealsenseImg, self.m_queueToWorker.get())
         if job_img is None:
             return True
 
@@ -136,8 +145,8 @@ class YOLOv5DetectWorker(BusWorker):
 
         ori_img = job_img.copy_out()
         if not job_img.key_frame:
-            job_detect_result = JobYOLOv5Result(
-                ori_img, np.empty((0, 6), np.float32)
+            job_detect_result = JobYOLOv5DetResult(
+                ori_img, np.empty((0, 4), np.float32)
             )
             job_detect_result.copy_tags(job_img)
             job_detect_result.key_frame = False
@@ -147,16 +156,46 @@ class YOLOv5DetectWorker(BusWorker):
         img, _ = self._preprocess(ori_img)
         img = img.astype('float32')
         img /= 255.
-        if self.onnx:
-            img = img[None]
-            pred = self.model.run(self.onnx_outputs, {self.onnx_input: img})[0]
+        # TODO
+        if self.pt:
+            outputs = self.model(img)
+        elif self.onnx:
+            outputs = self.model.run(self.onnx_outputs, {self.onnx_input: np.transpose(img, (2, 0, 1))[None]})[0]
         else:
-            pred = self.model.inference(inputs=[img])
+            outputs = self.model.inference(inputs=[img])
+
+        dets_per_img = self._postprocess(outputs, img.shape[:2], ori_img.shape[:2])
+        if len(dets_per_img) == 0:
+            job_detect_result = JobYOLOv5DetResult(image=ori_img,
+                                                   detection=np.empty((0, 4), np.float32))
+        else:
+            boxes, scores, cls = np.split(dets_per_img[0], [4, 1 + 4], axis=1)
+            vis_img = yolo_handle.det_process(ori_img, boxes, scores, cls)
+            job_detect_result = JobYOLOv5DetResult(image=vis_img,
+                                                   detection=boxes)
+        job_detect_result.copy_tags(job_img)
+        self.m_queueFromWorker.put(job_detect_result)
+
+    def _run_post(self) -> None:
+        del self.model
+        self.model = None
+        self.is_ready = None
 
     def _preprocess(self, img: np.ndarray, color: Tuple[int, int, int] = (114, 114, 144)):
-        img, _, [dw, dh] = yolo_pp.letterbox(img, (self.imgsz, self.imgsz))
+        img, _, [dw, dh] = yolo_handle.letterbox(img, self.imgsz, color)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img, [dw, dh]
+
+    def _postprocess(self, pred: np.ndarray, img_shape: Tuple, im0_shape: Tuple):
+        pred = yolo_handle.numpy_non_max_suppression(pred, self.conf_thresh, self.iou_thresh,
+                                                     max_det=self.max_det, nm=0)  # detect: nm=0!
+        dets_per_img = []
+        for i, det in enumerate(pred):
+            if len(det):
+                logger.info(f'det: {det}, img_shape: {img_shape}, im0_shape: {im0_shape}')
+                det[:, :4] = yolo_handle.scale_boxes(img_shape, det[:, :4], im0_shape).round()
+                dets_per_img.append(det)
+        return dets_per_img
 
     def get_supported_mode(self) -> ThreadMode:
         return ThreadMode.AllModes

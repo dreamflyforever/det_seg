@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # @Time: 2023/6/28 上午11:50
 # @Author: YANG.C
-# @File: yolo_postprocess.py
+# @File: yolo_handle.py
 
 import os
 import sys
@@ -307,3 +307,80 @@ def calc_angle(bbox):
         # calc yaw based on y axis
         yaw = 90 - yaw if yaw >= 0 else -(90 + yaw)
     return yaw
+
+
+def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
+    vis_colors = [colors(x, True) for x in det[:, 5]]
+    vis_colors = np.array(vis_colors, dtype=np.float32) / 255.0
+    vis_colors = vis_colors[:, np.newaxis, np.newaxis]
+
+    new_masks = np.transpose(masks, (1, 2, 0))
+    masks = masks[:, :, :, np.newaxis]
+    masks_color = masks * (vis_colors * alpha)
+    inv_alph_masks = (1 - masks * alpha).cumprod(0)  # shape(n,h,w,1)
+    mcs = (masks_color * inv_alph_masks).sum(0) * 2  # mask color summand shape(n,h,w,3)
+
+    im = im * inv_alph_masks[-1] + mcs
+    im = im[:, :, ::-1]
+    im_mask = (im * 255).astype(np.uint8)
+
+    # resize mask to original size
+    raw_masks = scale_image(im.shape, new_masks.astype(np.float32), shape)
+
+    boxes = []
+    yawes = []
+    centers = []
+    mask_nums = raw_masks.shape[2]
+    for i in range(mask_nums):
+        box, center = find_contours(raw_masks[:, :, i].astype('uint8') * 255)
+        boxes.extend(box)
+        centers.extend(center)
+
+    vis_img = scale_image(im.shape, im_mask, shape)
+
+    for box, center in zip(boxes, centers):
+        yaw = calc_angle(box)
+        yawes.append(yaw)
+
+        if visual:
+            cv2.drawContours(vis_img, [box], 0, (255, 255, 255), 2)
+
+            theta_rad = math.radians(yaw)
+            length = 70
+            x0, y0 = center[0], center[1]
+            x1 = int(x0 - length * math.cos(theta_rad))
+            y1 = int(y0 - length * math.sin(theta_rad))
+            x2 = int(x0 + length * math.cos(theta_rad))
+            y2 = int(y0 + length * math.sin(theta_rad))
+
+            text = str(int(yaw))
+            cv2.putText(vis_img, text, (x0 + 10, y0 + 10), FONT, FONT_SCALE, (0, 0, 255), 2, cv2.LINE_AA)
+            cv2.line(vis_img, (x1, y1), (x2, y2), color=(0, 0, 255), thickness=2)
+
+    return yawes, centers, vis_img
+
+def det_process(image, boxes, scores, classes):
+    """Draw the boxes on the image.
+
+    # Argument:
+        image: original image.
+        boxes: ndarray, boxes of objects.
+        classes: ndarray, classes of objects.
+        scores: ndarray, scores of objects.
+        all_classes: all classes name.
+    """
+    for box, score, cl in zip(boxes, scores, classes):
+        top, left, right, bottom = box
+        logger.debug(f'class: {int(cl)}, score: {float(score):.3f}')
+        logger.debug(f'box coordinate left, top, right, down: [{top:.3f}, {left:.3f}, {right:.3f}, {bottom:.3f}]')
+        top = int(top)
+        left = int(left)
+        right = int(right)
+        bottom = int(bottom)
+
+        cv2.rectangle(image, (top, left), (right, bottom), (255, 0, 0), 2)
+        cv2.putText(image, '{0} {1:.2f}'.format(str(int(cl)), float(score)),
+                    (top, left - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6, (0, 0, 255), 2)
+        return image

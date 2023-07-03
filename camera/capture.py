@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 
 capture_base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(capture_base)
@@ -17,17 +18,19 @@ import numpy as np
 from shared_ndarray import SharedNDArray
 
 from utils.log import logger
+from camera.utils import CaptureState
 from concurrency.bus import BusWorker, ServiceId, BusService
 from concurrency.job_package import JobPkgBase
 from concurrency.safe_queue import QueueSettings, QueueType
 from concurrency.thread_runner import ThreadMode
 
 
-class JobSharedImg(JobPkgBase):
+class JobSharedCapImg(JobPkgBase):
     def __init__(self, image: np.ndarray | SharedNDArray, key_frame: bool = False):
         super().__init__()
         self._private_image: np.ndarray | SharedNDArray | None = image
         self.key_frame = key_frame
+        self.intrins_params = None
 
     def convert_to_shared_memory(self):
         assert self._private_image is not None
@@ -68,25 +71,18 @@ class JobSharedImg(JobPkgBase):
         pass
 
 
-class CaptureState(enum.IntEnum):
-    Fresh = 0x0
-    Configured = 0x1
-    Opened = 0x2
-    Error = 0x8
-
-
-class VideoFileCapture(BusWorker):
-    def __init__(self, name: str):
-        super().__init__(ServiceId.FILE_CAPTURE, name)
-        self.set_brief_name('VfCap')
+class VideoCapture(BusWorker):
+    def __init__(self, name: str, hub: int = 0, width: int = 1600, height: int = 1200, fps: int = 25):
+        super().__init__(ServiceId.FISH_CAPTURE, name)
         self.m_eof = False
         self.m_cam_id = 0
         self.m_url = 0
+        self.m_hub = hub
+        self.m_width = width
+        self.m_height = height
+        self.m_fps = fps
         self.m_state = CaptureState.Fresh.value
         self.m_gpu = -1
-        self.m_fps = 25
-        self.m_width = -1
-        self.m_height = -1
         self.m_frame_id = -1
         self.m_frame_count = -1
         self.m_sample_frame: np.ndarray | None = None
@@ -105,7 +101,12 @@ class VideoFileCapture(BusWorker):
         return self.m_eof
 
     def collect_info(self, keep_open=False) -> None:
-        self.m_cap = cv2.VideoCapture(self.m_url)
+        self.m_cap = cv2.VideoCapture(self.m_hub + cv2.CAP_ANY)
+        self.m_cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.m_width)
+        self.m_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.m_height)
+        self.m_cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        self.m_cap.set(cv2.CAP_PROP_FPS, self.m_fps)
+
         if self.m_cap.isOpened():
             self.m_frame_count = self.m_cap.get(cv2.CAP_PROP_FRAME_COUNT)
             self.m_width = self.m_cap.get(cv2.CAP_PROP_FRAME_WIDTH)
@@ -139,12 +140,19 @@ class VideoFileCapture(BusWorker):
             success, img = self.m_cap.read()
         else:
             success, img = self.m_cap.nextFrame()
+        capture_time = time.time() * 1e3
+
         if not success or img is None:
             self.m_eof = True
             return True  # also breath
+
         self.m_frame_id += 1
-        finished_job = JobSharedImg(img)
+
+        intrins_params, undistorted_img = self.fish_cam_undistort(img)
+        finished_job = JobSharedCapImg(undistorted_img)
         finished_job.frame_id = self.m_frame_id
+        finished_job.intrins_params = intrins_params
+        finished_job.time_stamp = capture_time
         if self.m_frame_id % (self.m_skip_frame + 1) == 0:
             finished_job.key_frame = True
         if self.get_running_mode() == ThreadMode.InProcess:
@@ -164,3 +172,32 @@ class VideoFileCapture(BusWorker):
     def set_skip_frame(self, skip_frame):
         assert skip_frame >= 0, "The number if skip frame must be greater than or equal to 0"
         self.m_skip_frame = skip_frame
+
+    def fish_cam_undistort(self, img, scale=1.0, imshow=False, zc=True):
+        k, d, dim = None, None, None
+        if zc:
+            k = np.array(
+                [[363.98953227211905, 0.0, 834.3158978931784], [0.0, 363.9524177963977, 650.107887396256],
+                 [0.0, 0.0, 1.0]])
+            d = np.array(
+                [[0.002653439135043621], [-0.010520573385910588], [0.00144632201051458], [-0.0008507916189458718]])
+            dim = (1600, 1200)
+
+        dim1 = img.shape[:2][::-1]  # dim1 is the dimension of input image to un-distort
+        # assert dim1[0]/dim1[1] == DIM[0]/DIM[1], "Image to undistort needs to have same aspect ratio as the ones used in calibration"
+        if dim1[0] != dim[0]:
+            img = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
+        knew = k.copy()
+        if scale:  # change fov
+            knew[(0, 1), (0, 1)] = scale * knew[(0, 1), (0, 1)]
+
+        fx = knew[0][0]
+        fy = knew[1][1]
+        cx = knew[0][2]
+        cy = knew[1][2]
+        intrins_params = [fx, fy, cx, cy]
+        map1, map2 = cv2.fisheye.initUndistortRectifyMap(k, d, np.eye(3), knew, dim, cv2.CV_16SC2)
+        undistorted_img = cv2.remap(img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        if imshow:
+            cv2.imshow("undistorted", undistorted_img)
+        return intrins_params, undistorted_img

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # @Time: 2023/6/28 下午5:02
 # @Author: YANG.C
-# @File: segment.py
+# @File: segmentor.py
 
 import os
 import sys
@@ -21,29 +21,33 @@ from utils.log import logger
 from concurrency.bus import BusWorker, ServiceId
 from concurrency.job_package import JobPkgBase
 from concurrency.thread_runner import ThreadMode
-from camera.capture import JobSharedImg
-
-import algorithm.utils.yolo_postprocess as yolo_pp
+from camera.realsense import JobSharedRealsenseImg
+from camera.capture import JobSharedCapImg
+import algorithm.utils.yolo_handle as yolo_handle
 
 
 class JobYOLOv5SegResult(JobPkgBase):
-    """JobPkg of YOLOv5 detection results.
+    """JobPkg of YOLOv5 Segmentation results.
 
     Attributes:
         images: source image
         detections: ndarray with
     """
 
-    def __init__(self, image: np.ndarray, detection: np.ndarray, masks: np.ndarray, key_frame: bool = True):
+    def __init__(self, image: np.ndarray, detection: List[np.ndarray], masks: List[np.ndarray], key_frame: bool = True,
+                 intrins_params=None, yawes=None, centers=None):
         super().__init__()
         self.image = image
         self.detections = detection
         self.key_frame = key_frame
         self.masks = masks
+        self.intrins_params = intrins_params
+        self.yawes = yawes
+        self.centers = centers
 
 
 class YOLOv5SegmentWorker(BusWorker):
-    """YOLOv5 Detector.
+    """YOLOv5 Segmentor.
 
     Args:
         weight: path to exported yolov5 weight
@@ -54,44 +58,52 @@ class YOLOv5SegmentWorker(BusWorker):
         max_det
     """
 
-    def __init__(self, weight: str, imgsz: Union[Union[List, Tuple], int],
+    def __init__(self, weight: str = '', imgsz: Union[Union[List, Tuple], int] = 640, cuda: bool = False,
                  iou_thresh: float = 0.5, conf_thresh: float = 0.5, max_det: int = 300, ):
-        super().__init__(ServiceId.DETECTOR, 'YOLOv5')
+        super().__init__(ServiceId.SEGMENTATION, 'YOLOv5Seg')
         assert Path(weight).expanduser().exists(), weight
         assert 0 <= iou_thresh < 1, f'Invalid iou threshold {conf_thresh}, it must range [0, 1)'
         assert 0 <= conf_thresh < 1, f'Invalid confidence threshold {conf_thresh}, it must range [0, 1)'
 
         self.weight = str(Path(weight).expanduser())
         self.imgsz = (imgsz, imgsz) if isinstance(imgsz, int) else imgsz
+        self.cuda = cuda
         self.iou_thresh = iou_thresh
         self.conf_thresh = conf_thresh
         self.max_det = max_det
+        self.colors = yolo_handle.Colors()
 
-        self.onnx, self.rknn = [weight.endswith(x) for x in ('.onnx', '.rknn')]
-        if not any((self.onnx, self.rknn)):
+        self.pt, self.onnx, self.rknn = [weight.endswith(x) for x in ('.pt', '.onnx', '.rknn')]
+        if not any((self.pt, self.onnx, self.rknn)):
             raise ValueError(f'Not supported weight file: {self.weight}')
 
     def _load_model(self) -> None:
-        if self.onnx:
-            logger.info(f'model format is onnx')
+        if self.pt:
+            logger.info(f'{self.fullname()}, model format is pytorch')
+            logger.info(f'{self.fullname()}, start loading model: {self.weight}')
+            import torch
+            self.model = torch.load(self.weight)
+        elif self.onnx:
+            logger.info(f'{self.fullname()}, model format is onnx')
             logger.info(f'{self.fullname()}, start loading model: {self.weight}')
 
             import onnxruntime as ort
-            self.model = ort.InferenceSession(self.weight, None)
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if self.cuda else ['CPUExecutionProvider']
+            self.model = ort.InferenceSession(self.weight, providers=providers)
             self.onnx_input = self.model.get_inputs()[0].name
             self.onnx_outputs = [o.name for o in self.model.get_outputs()]
 
         else:
-            logger.info(f'model format is rknn')
+            logger.info(f'{self.fullname()}, model format is RKNN')
             logger.info(f'{self.fullname()}, start loading model: {self.weight}')
 
             from rknnlite.api import RKNNLite
             self.model = RKNNLite()
             ret = self.model.load_rknn(self.weight)
             if ret != 0:
-                logger.error(f'load RKNN model failed!')
+                logger.error(f'{self.fullname()}, load RKNN model failed!')
                 exit(ret)
-            logger.info(f'Init runtime environment successful')
+            logger.info(f'{self.fullname()}, Init runtime environment successful')
 
     def _warmup_model(self) -> None:
         assert self.model is not None, 'load model before warmup'
@@ -103,7 +115,9 @@ class YOLOv5SegmentWorker(BusWorker):
         while cnt < 10:
             cnt += 1
             tick = time.time()
-            if self.onnx:
+            if self.pt:
+                self.model(img)
+            elif self.onnx:
                 self.model.run(self.onnx_outputs, {self.onnx_input: img})
             else:
                 self.model.inference(inputs=[img[0]])
@@ -126,7 +140,7 @@ class YOLOv5SegmentWorker(BusWorker):
             return True
         if self.m_queueToWorker.empty():
             return True
-        job_img = cast(JobSharedImg, self.m_queueToWorker.get())
+        job_img = cast(JobSharedCapImg, self.m_queueToWorker.get())
         if job_img is None:
             return True
 
@@ -137,8 +151,10 @@ class YOLOv5SegmentWorker(BusWorker):
 
         ori_img = job_img.copy_out()
         if not job_img.key_frame:
-            job_detect_result = YOLOv5SegmentWorker(
-                ori_img, np.empty((0, 6), np.float32)
+            job_detect_result = JobYOLOv5SegResult(
+                image=ori_img,
+                detection=[np.empty((0, 6), np.float32)],
+                masks=[np.empty((0, 6), np.float32)]
             )
             job_detect_result.copy_tags(job_img)
             job_detect_result.key_frame = False
@@ -148,28 +164,60 @@ class YOLOv5SegmentWorker(BusWorker):
         img, _ = self._preprocess(ori_img)
         img = img.astype('float32')
         img /= 255.
+        # TODO
+        if self.pt:
+            outputs = self.model(img)
         if self.onnx:
-            outputs = self.model.run(self.onnx_outputs, {self.onnx_input: img[None]})[0]
+            outputs = self.model.run(self.onnx_outputs, {self.onnx_input: np.transpose(img, (2, 0, 1))[None]})
         else:
-            outputs = self.model.inference(inputs=[img])
+            outputs = self.model.inference(inputs=[img])  # RKNN
         pred, proto = outputs
-        det, masks = self._postprocess(pred, proto, img.shape[:2], ori_img.shape[:2])
-        job_segment_result = JobYOLOv5SegResult(ori_img.copy(), det, masks)
+        if self.rknn:
+            pred = np.squeeze(pred, axis=-1)
+        dets_per_img, masks_per_img = self._postprocess(pred, proto, img.shape[:2], ori_img.shape[:2])
+        if len(dets_per_img):
+            yawes, centers, vis_img = yolo_handle.seg_process(self.colors, dets_per_img[0], masks_per_img[0], img,
+                                                              ori_img.shape)
+            job_segment_result = JobYOLOv5SegResult(vis_img.copy(), dets_per_img, masks_per_img,
+                                                    job_img.intrins_params, yawes, centers)
+
+        else:
+            job_segment_result = JobYOLOv5SegResult(ori_img.copy(), dets_per_img, masks_per_img, job_img.intrins_params)
+
         job_segment_result.copy_tags(job_img)
         self.m_queueFromWorker.put(job_segment_result)
 
+    def _run_post(self) -> None:
+        del self.model
+        self.model = None
+        self.is_ready = None
+
     def _preprocess(self, img: np.ndarray, color: Tuple[int, int, int] = (114, 114, 144)):
-        img, _, [dw, dh] = yolo_pp.letterbox(img, (self.imgsz, self.imgsz))
+        img, _, [dw, dh] = yolo_handle.letterbox(img, self.imgsz)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img, [dw, dh]
 
     def _postprocess(self, pred: np.ndarray, proto: np.ndarray, img_shape: Tuple, im0_shape: Tuple):
-        pred = yolo_pp.numpy_non_max_suppression(pred, self.conf_thresh, self.iou_thresh, max_det=self.max_det, nm=32)
+        pred = yolo_handle.numpy_non_max_suppression(pred, self.conf_thresh, self.iou_thresh,
+                                                     max_det=self.max_det, nm=32)  # segment: nm=32!
+        dets_per_img = []
+        masks_per_img = []
         for i, det in enumerate(pred):
             if len(det):
-                masks = yolo_pp.numpy_process_mask(proto[i], det[:, 6:], det[:, :4], img_shape, upsample=True)
-                det[:, :4] = yolo_pp.scale_boxes(img_shape, det[:, :4], im0_shape).round()
-        return det, masks
+                masks = yolo_handle.numpy_process_mask(proto[i], det[:, 6:], det[:, :4], img_shape, upsample=True)
+                det[:, :4] = yolo_handle.scale_boxes(img_shape, det[:, :4], im0_shape).round()
+                dets_per_img.append(det)
+                masks_per_img.append(masks)
+        return dets_per_img, masks_per_img
 
     def get_supported_mode(self) -> ThreadMode:
         return ThreadMode.AllModes
+
+
+if __name__ == '__main__':
+    yolo = YOLOv5SegmentWorker()
+    yolo.set_running_model(ThreadMode.Threaded)
+    yolo.start_run()
+
+    print(yolo.m_thread, yolo.m_queueFromWorker)
+    print(yolo.fullname())
