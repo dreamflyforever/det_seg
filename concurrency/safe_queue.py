@@ -59,6 +59,10 @@ class SafeQueue(InstanceName):
     def size(self) -> int:
         return self.m_cached_size
 
+    def len(self) -> int:
+        with self.m_lock:
+            return self.m_queue.__len__()
+
     def full(self) -> bool:
         return self.size() >= self.m_settings.length
 

@@ -26,7 +26,13 @@ class ServiceId(enum.IntEnum):
     NULL_MODULE = 0
     DETECTOR = 1
     SEGMENTATION = 2
+
     FILE_CAPTURE = 100
+    REALSENSE_CAPTURE = 101
+    FISH_CAPTURE = 102
+
+    CONNECT = 600
+    ZMQ = 601
 
     @staticmethod
     def all_ids() -> tuple:
