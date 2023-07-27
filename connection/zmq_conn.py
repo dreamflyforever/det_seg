@@ -27,6 +27,7 @@ from concurrency.thread_runner import ThreadMode
 from concurrency.safe_queue import SafeQueue
 from concurrency.bus import BusWorker, BusService, ServiceId
 from connection.rgbd_proto_pb2 import TargetLocation
+from connection.rgbd_repeat_pb2 import pose_array
 from connection.ArmCamera_pb2 import BottlePose
 
 
@@ -87,17 +88,22 @@ class ZMQConnection(BusWorker):
             # xyzs = self.pix2camera(detections, depth_frame, depth_intrin)
             xyzs = self.pix2camera_with_repair3x(detections, depth_frame, depth_intrin)
             det_xyzs = xyzs
-            det_msg = TargetLocation()
-            det_msg.seq = job_data.frame_id
-            det_msg.ts = job_data.time_stamp
-            if len(det_xyzs) == 0:
-                det_msg.x1, det_msg.y1, det_msg.z1 = 9999, 9999, 9999
-                det_msg.x2, det_msg.y2, det_msg.z2 = 9999, 9999, 9999
-                logger.info(f'{self.fullname()}, Detector: no object be found!')
-            # 这样对于每一个object都获得了一个减轻漂移的深度数据
-            else:
-                # 维护一个队列FIFO，15帧，窗口为5，
-                for i in range(len(det_xyzs)):
+
+            single_obj = False
+            multi_obj = True
+            multi_vec = []
+            if single_obj:
+                det_msg = TargetLocation()
+                det_msg.seq = job_data.frame_id
+                det_msg.ts = job_data.time_stamp
+                if len(det_xyzs) == 0:
+                    det_msg.x1, det_msg.y1, det_msg.z1 = 9999, 9999, 9999
+                    det_msg.x2, det_msg.y2, det_msg.z2 = 9999, 9999, 9999
+                    logger.info(f'{self.fullname()}, Detector: no object be found!')
+                # 这样对于每一个object都获得了一个减轻漂移的深度数据
+                else:
+                    # 维护一个队列FIFO，15帧，窗口为5，
+                    i = len(det_xyzs) - 1
                     det_msg.x1 = -det_xyzs[i][0]
                     det_msg.y1 = det_xyzs[i][2]
                     det_msg.z1 = det_xyzs[i][1]
@@ -105,12 +111,38 @@ class ZMQConnection(BusWorker):
                     det_msg.x2 = loc_re[0] - self.camera_dis
                     det_msg.y2 = loc_re[1] + self.robot_length - self.shot_dis
                     det_msg.z2 = loc_re[2] - self.robot_height
+            if multi_obj:
+                det_msg = pose_array()
+                if len(det_xyzs) == 0:
+                    p = det_msg.pose.add()
+                    p.seq = job_data.frame_id
+                    p.ts = job_data.time_stamp
+                    p.x1, p.y1, p.z1 = 9999, 9999, 9999
+                    p.x2, p.y2, p.z2 = 9999, 9999, 9999
+                    logger.info(f'{self.fullname()}, Detector: no object be found!')
+                else:
+                    for i in range(len(det_xyzs)):
+                        p = det_msg.pose.add()
+                        p.seq = job_data.frame_id
+                        p.ts = job_data.time_stamp
+                        p.x1 = -det_xyzs[i][0]
+                        p.y1 = det_xyzs[i][2]
+                        p.z1 = det_xyzs[i][1]
+                        loc_re = self.location_translation(-p.x1, p.y1, p.z1, 0)
+                        p.x2 = loc_re[0] - self.camera_dis
+                        p.y2 = loc_re[1] + self.robot_length - self.shot_dis
+                        p.z2 = loc_re[2] - self.robot_height
+                        multi_vec.append([p.x1, p.y1, p.z1])
+            serialized_det_msg = det_msg.SerializeToString()
+            self.sockets['detect'].send(serialized_det_msg)
 
-                    serialized_det_msg = det_msg.SerializeToString()
-                    self.sockets['detect'].send(serialized_det_msg)
+            if single_obj:
+                result_vec = np.array([det_msg.x1, det_msg.y1, det_msg.z1])
+            elif multi_obj:
+                result_vec = np.array(multi_vec)
 
-                    vec1 = np.array([det_msg.x1, det_msg.y1, det_msg.z1])
-                    logger.info(f'{self.fullname()}, zmq send detection message successful, local position: {vec1}')
+            logger.info(f'{self.fullname()}, zmq send detection message successful, single obj: {single_obj}, '
+                        f'multi obj: {multi_obj}, local position: {result_vec}')
 
         # segmentation
         if isinstance(job_data, JobYOLOv5SegResult):
