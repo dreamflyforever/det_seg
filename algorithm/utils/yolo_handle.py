@@ -359,6 +359,7 @@ def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
 
     return yawes, centers, vis_img
 
+
 def det_process(image, boxes, scores, classes):
     """Draw the boxes on the image.
 
@@ -383,4 +384,4 @@ def det_process(image, boxes, scores, classes):
                     (top, left - 6),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6, (0, 0, 255), 2)
-        return image
+    return image

@@ -35,8 +35,8 @@ class JobYOLOv5SegResult(JobPkgBase):
     """
 
     def __init__(self, image: np.ndarray, detection: List[np.ndarray], masks: List[np.ndarray], key_frame: bool = True,
-                 intrins_params=None, yawes=None, centers=None):
-        super().__init__()
+                 intrins_params=None, yawes=[], centers=[]):
+        super(JobYOLOv5SegResult, self).__init__()
         self.image = image
         self.detections = detection
         self.key_frame = key_frame
@@ -103,6 +103,12 @@ class YOLOv5SegmentWorker(BusWorker):
             if ret != 0:
                 logger.error(f'{self.fullname()}, load RKNN model failed!')
                 exit(ret)
+            logger.info(f'{self.fullname()}, load RKNN model successful')
+
+            ret = self.model.init_runtime(core_mask=RKNNLite.NPU_CORE_0)
+            if ret != 0:
+                logger.error(f'{self.fullname()}, Init runtime environment failed!')
+                exit(ret)
             logger.info(f'{self.fullname()}, Init runtime environment successful')
 
     def _warmup_model(self) -> None:
@@ -154,7 +160,7 @@ class YOLOv5SegmentWorker(BusWorker):
             job_detect_result = JobYOLOv5SegResult(
                 image=ori_img,
                 detection=[np.empty((0, 6), np.float32)],
-                masks=[np.empty((0, 6), np.float32)]
+                masks=[np.empty((0, 6), np.float32)],
             )
             job_detect_result.copy_tags(job_img)
             job_detect_result.key_frame = False
@@ -163,11 +169,12 @@ class YOLOv5SegmentWorker(BusWorker):
 
         img, _ = self._preprocess(ori_img)
         img = img.astype('float32')
-        img /= 255.
         # TODO
         if self.pt:
+            img /= 255.
             outputs = self.model(img)
         if self.onnx:
+            img /= 255.
             outputs = self.model.run(self.onnx_outputs, {self.onnx_input: np.transpose(img, (2, 0, 1))[None]})
         else:
             outputs = self.model.inference(inputs=[img])  # RKNN
@@ -178,12 +185,14 @@ class YOLOv5SegmentWorker(BusWorker):
         if len(dets_per_img):
             yawes, centers, vis_img = yolo_handle.seg_process(self.colors, dets_per_img[0], masks_per_img[0], img,
                                                               ori_img.shape)
-            job_segment_result = JobYOLOv5SegResult(vis_img.copy(), dets_per_img, masks_per_img,
-                                                    job_img.intrins_params, yawes, centers)
-
+            job_segment_result = JobYOLOv5SegResult(image=vis_img.copy(), detection=dets_per_img, masks=masks_per_img,
+                                                    intrins_params=job_img.intrins_params, yawes=yawes,
+                                                    centers=centers, )
         else:
-            job_segment_result = JobYOLOv5SegResult(ori_img.copy(), dets_per_img, masks_per_img, job_img.intrins_params)
+            job_segment_result = JobYOLOv5SegResult(image=ori_img.copy(), detection=dets_per_img, masks=masks_per_img,
+                                                    intrins_params=job_img.intrins_params)
 
+        job_segment_result.intrins_params = job_img.intrins_params
         job_segment_result.copy_tags(job_img)
         self.m_queueFromWorker.put(job_segment_result)
 

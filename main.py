@@ -24,16 +24,10 @@ from concurrency.safe_queue import SafeQueue, QueueSettings, QueueType
 from concurrency.thread_runner import ThreadRunner, ThreadMode
 from camera.realsense import RealsenseCapture, JobSharedRealsenseImg
 from camera.capture import VideoCapture, JobSharedCapImg
+from connection.zmq_conn import ZMQConnection
 
 # debug
 from concurrency.bus import g_PendingBus, g_CompleteBus
-
-
-class MainWindow:
-    def __init__(self, cfg):
-        super().__init__()
-        self.fullname = 'MainWindow'
-        self.m_need_stop = False
 
 
 def main():
@@ -54,14 +48,14 @@ def main():
         det_imgsz = configs.models.detect.imgsz
         detector = YOLOv5DetectWorker(det_weight, det_imgsz, iou_thresh=det_nms_thres, conf_thresh=det_obj_thres)
         did = detector.get_service_id()
-        detector.set_running_model(ThreadMode.Threaded)
+        detector.set_running_model(ThreadMode.InProcess)
         detector.start_run()
         BusService.clear_queue(did)
 
         # pull flow
         realsense_cap = RealsenseCapture('RSCap')
         realsense_cap.config_out_queue(QueueSettings(mode, 25, True))
-        realsense_cap.set_running_model(ThreadMode.Threaded)
+        realsense_cap.set_running_model(ThreadMode.InProcess)
         realsense_cap.config()
         realsense_cap.start_run()
         rid = realsense_cap.get_service_id()
@@ -75,7 +69,7 @@ def main():
         seg_imgsz = configs.models.segment.imgsz
         segmentor = YOLOv5SegmentWorker(seg_weight, seg_imgsz, iou_thresh=seg_nms_thres, conf_thresh=seg_obj_thres)
         sid = segmentor.get_service_id()
-        segmentor.set_running_model(ThreadMode.Threaded)
+        segmentor.set_running_model(ThreadMode.InProcess)
         segmentor.start_run()
         BusService.clear_queue(sid)
 
@@ -86,63 +80,94 @@ def main():
         fish_cap = VideoCapture('FVCap', hub=fish_cap_hub, width=fish_cap_width, height=fish_cap_height,
                                 fps=fish_cap_fps)
         fish_cap.config_out_queue(QueueSettings(mode, 25, True))
-        fish_cap.set_running_model(ThreadMode.Threaded)
+        fish_cap.set_running_model(ThreadMode.InProcess)
         fish_cap.config()
         fish_cap.start_run()
         fid = fish_cap.get_service_id()
         BusService.clear_queue(fid)
 
+    # create connection
+    zmq_addrs = {}
+    zmq_det_valid = False
+    zmq_seg_valid = False
+    detect_addr = configs.connections.detect.zmq.addr
+    if len(detect_addr) > 0:
+        zmq_addrs['detect'] = detect_addr
+        zmq_det_valid = True
+    segment_addr = configs.connections.segment.zmq.addr
+    if len(segment_addr) > 0:
+        zmq_addrs['segment'] = segment_addr
+        zmq_seg_valid = True
+    if len(zmq_addrs.keys()) > 0:
+        zmq = ZMQConnection('connections', zmq_addrs)
+        zmq.set_running_model(ThreadMode.Threaded)
+        zmq.start_run()
+        zid = zmq.get_service_id()
+        BusService.clear_queue(zid)
+
     need_stop = False
 
     while not need_stop:
-        realsense_cap.pump()  # get a frame from realsense to BusServer(g_CompleteBus)
-        detector.pump()
-        fish_cap.pump()
-        segmentor.pump()  # get a frame from BusServer()
+        if configs.models.detect.valid:
+            realsense_cap.pump()  # get a frame from realsense to BusServer(g_CompleteBus)
+            detector.pump()
+        if configs.models.segment.valid:
+            fish_cap.pump()
+            segmentor.pump()  # get a frame from BusServer()
+        if configs.connections.valid:
+            zmq.pump()
 
-        if fish_cap.m_eof and not BusService.has_complete_job_fetch(fid):
-            break
+        if configs.models.detect.valid:
+            if realsense_cap.m_eof and not BusService.has_complete_job_fetch(rid):
+                break
+            # read a frame from video when to detect pending queue is not full
+            if not BusService.get_queue_app_to_worker(rid).full():
+                # get a frame from BusServer(g_CompleteBus)
+                realsense_cap_job = cast(JobSharedRealsenseImg, BusService.fetch_complete_job(rid))
+                if realsense_cap_job is not None:
+                    # send a frame to BusServer(g_PendingBus)
+                    BusService.send_job_to_worker(did, realsense_cap_job)
 
-        # read a frame from video when to detect pending queue is not full
-        if not BusService.get_queue_app_to_worker(fid).full():
-            fish_cap_job = cast(JobSharedCapImg, BusService.fetch_complete_job(fid))
-            if fish_cap_job is not None:
-                BusService.send_job_to_worker(sid, fish_cap_job)
+            det_job = cast(JobYOLOv5DetResult, BusService.fetch_complete_job(did))
 
-        if realsense_cap.m_eof and not BusService.has_complete_job_fetch(rid):
-            break
-        #
-        # read a frame from video when to detect pending queue is not full
-        if not BusService.get_queue_app_to_worker(rid).full():
-            # get a frame from BusServer(g_CompleteBus)
-            realsense_cap_job = cast(JobSharedRealsenseImg, BusService.fetch_complete_job(rid))
-            if realsense_cap_job is not None:
-                # send a frame to BusServer(g_PendingBus)
-                BusService.send_job_to_worker(did, realsense_cap_job)
+            if det_job is not None:
+                # send to zmq
+                if detect_addr is not None and zmq_det_valid:
+                    BusService.send_job_to_worker(zid, det_job)
 
-                # read segmentation results
-                seg_job = cast(JobYOLOv5SegResult, BusService.fetch_complete_job(sid))
-                if seg_job is not None:
-                    logger.info(f'{seg_job}')
+                color_image = det_job.image
+                cv2.namedWindow('det', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+                cv2.imshow('det', color_image)
+                key = cv2.waitKey(1)
+                if key & 0xFF == ord('q') or key == 27:
+                    cv2.destroyAllWindows()
+                    break
 
-                    color_image = seg_job.image
-                    cv2.namedWindow('seg', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
-                    cv2.imshow('seg', color_image)
-                    key = cv2.waitKey(1)
-                    if key & 0xFF == ord('q') or key == 27:  # 执行时，按q或esc退出
-                        cv2.destroyAllWindows()
-                        break
+        if configs.models.segment.valid:
+            if fish_cap.m_eof and not BusService.has_complete_job_fetch(fid):
+                break
+            # read a frame from video when to detect pending queue is not full
+            if not BusService.get_queue_app_to_worker(fid).full():
+                fish_cap_job = cast(JobSharedCapImg, BusService.fetch_complete_job(fid))
+                if fish_cap_job is not None:
+                    BusService.send_job_to_worker(sid, fish_cap_job)
 
-                det_job = cast(JobYOLOv5DetResult, BusService.fetch_complete_job(did))
-                if det_job is not None:
+            # read segmentation results
+            seg_job = cast(JobYOLOv5SegResult, BusService.fetch_complete_job(sid))
+            if seg_job is not None:
+                # send to zmq
+                if segment_addr is not None and zmq_seg_valid:
+                    BusService.send_job_to_worker(zid, seg_job)
 
-                    color_image = det_job.image
-                    cv2.namedWindow('det', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
-                    cv2.imshow('det', color_image)
-                    key = cv2.waitKey(1)
-                    if key & 0xFF == ord('q') or key == 27:  # 执行时，按q或esc退出
-                        cv2.destroyAllWindows()
-                        break
+                # logger.info(f'{seg_job}')
+
+                color_image = seg_job.image
+                cv2.namedWindow('seg', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+                cv2.imshow('seg', color_image)
+                key = cv2.waitKey(1)
+                if key & 0xFF == ord('q') or key == 27:  # 执行时，按q或esc退出
+                    cv2.destroyAllWindows()
+                    break
 
 
 if __name__ == '__main__':

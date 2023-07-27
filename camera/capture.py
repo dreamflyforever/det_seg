@@ -45,7 +45,7 @@ class JobSharedCapImg(JobPkgBase):
             self._private_image = None
         elif isinstance(self._private_image, SharedNDArray):
             # convert SharedNDArray to ndarray
-            out = np.copy(self._private_image)
+            out = np.copy(self._private_image.array)
             self._private_image.unlink()
             self._private_image = None
         else:
@@ -67,7 +67,7 @@ class JobSharedCapImg(JobPkgBase):
             self._private_image = None
 
     def __del__(self):
-        self.release()
+        # self.release()
         pass
 
 

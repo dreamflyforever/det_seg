@@ -15,31 +15,33 @@ models:
     cuda: 0
     port: 0
     platform: pc          # pc(onnx) / rknn(rknn)
-    weight: '/home/ycc/PycharmProjects/yolov5/runs/train/exp8/weights/best.onnx'
+    weight: '/home/ycc/Jim/yolov5/models/yolov5s-det-0724.onnx'
     imgsz: 640
-    obj_threshold: 0.3
+    obj_threshold: 0.5
     nms_threshold: 0.5
 
   segment:
-    valid: True
+    valid: False
     cuda: 0
     port: 1
     platform: pc
-    weight: '/home/ycc/PycharmProjects/yolov5/runs/train-seg/exp5/weights/best.onnx'
+    weight: '/home/ycc/Jim/yolov5/models/yolov5n-seg-0724.onnx'
     imgsz: 640
-    obj_threshold: 0.3
+    obj_threshold: 0.5
     nms_threshold: 0.5
 
 cameras:
   realsense:
 
   fish:
-    hub: 4
+    hub: 0
     width: 1600
     height: 1200
     fps: 25
 
 connections:
+  valid: True
+
   detect:
     zmq:
       addr: "tcp://*:8003"

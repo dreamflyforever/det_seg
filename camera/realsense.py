@@ -36,9 +36,11 @@ class JobSharedRealsenseImg(JobPkgBase):
         self._private_image: np.ndarray | SharedNDArray | None = image
         self.key_frame = key_frame
         self.intrins_params = None
-        self.depth_params = None
+        # width, height, ppx, ppy, fx, fy, model, [coeffs]
+        self.depth_params = [0, 0, 0, 0, 0, 0, None, [0, 0, 0, 0, 0]]
         self.aligned_depth_frame = None
         self.depth_image = None
+
 
     def convert_to_shared_memory(self):
         assert self._private_image is not None
@@ -53,7 +55,7 @@ class JobSharedRealsenseImg(JobPkgBase):
             self._private_image = None
         elif isinstance(self._private_image, SharedNDArray):
             # convert SharedNDArray to ndarray
-            out = np.copy(self._private_image)
+            out = np.copy(self._private_image.array)
             self._private_image.unlink()
             self._private_image = None
         else:
@@ -75,7 +77,7 @@ class JobSharedRealsenseImg(JobPkgBase):
             self._private_image = None
 
     def __del__(self):
-        self.release()
+        # self.release()
         pass
 
 
@@ -111,7 +113,7 @@ class RealsenseCapture(BusWorker):
     def collect_info(self, keep_open=False) -> None:
         self.set_realsense(width=640, height=360, fps=15)
         self.get_aligned_images()
-        # logger.info(f'{self.fullname()}, collect_info...')
+        logger.info(f'{self.fullname()}, collect_info...')
 
     def _run_pre(self) -> None:
         self.m_eof = False
@@ -128,23 +130,26 @@ class RealsenseCapture(BusWorker):
         if (pipeline and align) is not None:
             intr, depth_intrin, color_image, depth_image, aligned_depth_frame = self.get_aligned_images()
             capture_time = time.time() * 1e3
-            if not depth_image.any() or not color_image.any():
-                logger.error(f'{self.fullname()}, read all zeros depth or color image from realsense')
+            if not depth_image.any() or not color_image.any() or not aligned_depth_frame:
+                logger.error(f'{self.fullname()}, read all zeros depth or color image or aligned from realsense')
                 success = False
         else:
             logger.error(f'{self.fullname()}, read depth or color image from realsense failed!')
             success = False
 
         if not success:
-            self.m_eof = True
+            # self.m_eof = True
             return True  # also breath
-
         self.m_frame_id += 1
         finished_job = JobSharedRealsenseImg(color_image)
         finished_job.depth_image = depth_image
-        finished_job.intrins_params = intr
-        finished_job.depth_params = depth_intrin
+        finished_job.depth_params = [depth_intrin.width, depth_intrin.height, depth_intrin.ppx, depth_intrin.ppy,
+                                    depth_intrin.fx, depth_intrin.fy, None, depth_intrin.coeffs]
+
+        # logger.debug(f'aligned: {aligned_depth_frame.get_distance(100, 120)}')
+        # logger.debug(f'distance: {depth_image[120][100]}, {depth_image[100][120]}')
         finished_job.time_stamp = capture_time
+
         # logger.info(f'{self.fullname()}, read image successful, {color_image.shape}')
         finished_job.frame_id = self.m_frame_id
         if self.m_frame_id % (self.m_skip_frame + 1) == 0:
@@ -186,6 +191,7 @@ class RealsenseCapture(BusWorker):
         self.get_aligned_images()
 
     def get_aligned_images(self):  # 逐帧从realsense读取图像
+        time.sleep(5 / 1000.)
         frames = pipeline.wait_for_frames()  # 等待获取图像帧
         aligned_frames = align.process(frames)  # 获取对齐帧
         aligned_depth_frame = aligned_frames.get_depth_frame()  # 获取对齐帧中的depth帧

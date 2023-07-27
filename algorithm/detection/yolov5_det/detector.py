@@ -37,6 +37,10 @@ class JobYOLOv5DetResult(JobPkgBase):
     def __init__(self, image: np.ndarray, detection: np.ndarray, key_frame: bool = True):
         super().__init__()
         self.image = image
+        self.aligned_depth_frame = None
+        self.depth_image = None
+        self.intrins_params = None
+        self.depth_params = None
         self.detections = detection
         self.key_frame = key_frame
 
@@ -97,6 +101,12 @@ class YOLOv5DetectWorker(BusWorker):
             if ret != 0:
                 logger.error(f'{self.fullname()}, load RKNN model failed!')
                 exit(ret)
+            logger.info(f'{self.fullname()}, load RKNN model successful')
+
+            ret = self.model.init_runtime(core_mask=RKNNLite.NPU_CORE_0)
+            if ret != 0:
+                logger.error(f'{self.fullname()}, Init runtime environment failed!')
+                exit(ret)
             logger.info(f'{self.fullname()}, Init runtime environment successful')
 
     def _warmup_model(self) -> None:
@@ -136,6 +146,7 @@ class YOLOv5DetectWorker(BusWorker):
             return True
         job_img = cast(JobSharedRealsenseImg, self.m_queueToWorker.get())
         if job_img is None:
+            print('job_img is None')
             return True
 
         if self.get_running_mode() == ThreadMode.InProcess:
@@ -155,14 +166,17 @@ class YOLOv5DetectWorker(BusWorker):
 
         img, _ = self._preprocess(ori_img)
         img = img.astype('float32')
-        img /= 255.
         # TODO
         if self.pt:
+            img /= 255.
             outputs = self.model(img)
         elif self.onnx:
+            img /= 255.
             outputs = self.model.run(self.onnx_outputs, {self.onnx_input: np.transpose(img, (2, 0, 1))[None]})[0]
         else:
-            outputs = self.model.inference(inputs=[img])
+            outputs = self.model.inference(inputs=[img])[0]
+            outputs = np.array(outputs)
+            outputs = np.squeeze(outputs, axis=-1)
 
         dets_per_img = self._postprocess(outputs, img.shape[:2], ori_img.shape[:2])
         if len(dets_per_img) == 0:
@@ -173,8 +187,11 @@ class YOLOv5DetectWorker(BusWorker):
             vis_img = yolo_handle.det_process(ori_img, boxes, scores, cls)
             job_detect_result = JobYOLOv5DetResult(image=vis_img,
                                                    detection=boxes)
+        job_detect_result.depth_image = job_img.depth_image
+        job_detect_result.depth_params = job_img.depth_params
         job_detect_result.copy_tags(job_img)
         self.m_queueFromWorker.put(job_detect_result)
+        return False
 
     def _run_post(self) -> None:
         del self.model
