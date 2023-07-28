@@ -177,14 +177,14 @@ class ZMQConnection(BusWorker):
 
     @staticmethod
     def pickle_camera_params(depth_intrin):
-        depth_intrinsic = rs.pyrealsense2.intrinsics()
+        depth_intrinsic = rs.intrinsics()
         depth_intrinsic.width = depth_intrin[0]
         depth_intrinsic.height = depth_intrin[1]
         depth_intrinsic.ppx = depth_intrin[2]
         depth_intrinsic.ppy = depth_intrin[3]
         depth_intrinsic.fx = depth_intrin[4]
         depth_intrinsic.fy = depth_intrin[5]
-        depth_intrinsic.model = rs.pyrealsense2.distortion.inverse_brown_conrady
+        depth_intrinsic.model = rs.distortion.inverse_brown_conrady
         depth_intrinsic.coeffs = depth_intrin[7]
         return depth_intrinsic
 
