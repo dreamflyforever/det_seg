@@ -64,4 +64,4 @@ connections:
 
   segment:
     zmq:
-      addr: "tcp://*:8004"
+      addr: "tcp://*:8013"
