@@ -87,7 +87,7 @@ class ZMQConnection(BusWorker):
             depth_frame = job_data.depth_image
             depth_intrin = self.pickle_camera_params(job_data.depth_params)
             # xyzs = self.pix2camera(detections, depth_frame, depth_intrin)
-            xyzs = self.pix2camera_with_repair3x(detections, depth_frame, depth_intrin)
+            xyzs = self.pix2camera_with_repair(detections, depth_frame, depth_intrin, points=5)
             det_xyzs = xyzs
 
             single_obj = False
@@ -207,15 +207,22 @@ class ZMQConnection(BusWorker):
         return camera_xyz_list
 
     @staticmethod
-    def pix2camera_with_repair3x(xyxy_list, aligned_depth_frame, depth_intrin):
+    def pix2camera_with_repair(xyxy_list, aligned_depth_frame, depth_intrin, points=3):
+        # TODO: test latency for support more points
+        assert points in [3, 5]
         camera_xyz_list = []  # 坐标二维列表
         # 40cm - 1cm, 100cm - 2cm
         if len(xyxy_list) > 0:
             for i in range(len(xyxy_list)):
                 ux = int((xyxy_list[i][0] + xyxy_list[i][2]) / 2)  # 计算像素坐标系的x
                 uy = int((xyxy_list[i][1] + xyxy_list[i][3]) / 2)  # 计算像素坐标系的y
-                ux_points = [ux - 1, ux, ux + 1]
-                uy_points = [uy, uy, uy]
+                # TODO: more general for many points
+                if points == 3:
+                    ux_points = [ux - 1, ux, ux + 1]
+                    uy_points = [uy, uy, uy]
+                else:
+                    ux_points = [ux - 1, ux, ux + 1, ux, ux]
+                    uy_points = [uy, uy, uy, uy - 1, uy + 1]
                 x_points, y_points = [], []
                 z_points = []
                 # [(x-1, y), (x, y), (x+1, y)]
@@ -233,13 +240,25 @@ class ZMQConnection(BusWorker):
                     z_points.append(camera_xyz[2])
 
                 if len(z_points):
-                    # mean_dis = sum(dis_points) / len(dis_points)
-                    # means_dis = [mean_dis for i in range(len(dis_points))]
-                    # diff_dis = dis_points - means_dis
-                    # max_diff_dis = max(diff_dis)
-                    x_avg = sum(x_points) / len(x_points)
-                    y_avg = sum(y_points) / len(y_points)
                     z_avg = sum(z_points) / len(z_points)
+
+                    offset = z_avg / 40  # 1m -> 2.5cm, 2m -> 5cm
+                    filter_index = []
+                    # filter
+                    for i in range(len(z_points)):
+                        if (z_points[i] - z_avg) > offset:
+                            filter_index.append(i)
+                    if len(filter_index) == len(z_points):
+                        continue
+                    x_sum, y_sum, z_sum = 0, 0, 0
+                    for i in range(len(z_points)):
+                        if i not in filter_index:
+                            x_sum += x_points[i]
+                            y_sum += y_points[i]
+                            z_sum += z_points[i]
+                    x_avg = x_sum / (len(x_points) - len(filter_index))
+                    y_avg = y_sum / (len(y_points) - len(filter_index))
+                    z_avg = z_sum / (len(z_points) - len(filter_index))
                     camera_xyz_list.append([x_avg, y_avg, z_avg])
         return camera_xyz_list
 

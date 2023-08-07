@@ -15,13 +15,13 @@ models:
     cuda: 0
     port: 0
     platform: pc          # pc(onnx) / rknn(rknn)
-    weight: '/home/ycc/Jim/yolov5/models/yolov5s-det-0724.onnx'
+    weight: '/home/ycc/Jim/yolov5/models/yolov5s-det-0728.onnx'
     imgsz: 640
     obj_threshold: 0.5
     nms_threshold: 0.5
 
   segment:
-    valid: False
+    valid: True
     cuda: 0
     port: 1
     platform: pc
@@ -34,7 +34,20 @@ cameras:
   realsense:
 
   fish:
+    hub: 4
+    width: 1600
+    height: 1200
+    fps: 25
+
+  doubleFish: True
+  fishL:
     hub: 0
+    width: 1600
+    height: 1200
+    fps: 25
+
+  fishR:
+    hub: 1
     width: 1600
     height: 1200
     fps: 25
