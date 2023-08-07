@@ -100,9 +100,7 @@ class ZMQConnection(BusWorker):
                     det_msg.x1, det_msg.y1, det_msg.z1 = 9999, 9999, 9999
                     det_msg.x2, det_msg.y2, det_msg.z2 = 9999, 9999, 9999
                     logger.info(f'{self.fullname()}, Detector: no object be found!')
-                # 这样对于每一个object都获得了一个减轻漂移的深度数据
                 else:
-                    # 维护一个队列FIFO，15帧，窗口为5，
                     i = len(det_xyzs) - 1
                     det_msg.x1 = -det_xyzs[i][0]
                     det_msg.y1 = det_xyzs[i][2]
@@ -150,6 +148,7 @@ class ZMQConnection(BusWorker):
             seg_centers = job_data.centers
             seg_intrins_params = job_data.intrins_params
             seg_msg = BottlePose()
+            yewes = []
             if len(seg_yawes) == 0:
                 # seg_msg.data_valid = 0
                 logger.info(f'{self.fullname()}, Segmentor: no object be found!')
@@ -164,9 +163,10 @@ class ZMQConnection(BusWorker):
                     # seg_msg.data_valid = 1
                     seg_msg.x, seg_msg.y, seg_msg.z = real_loc[0] / 1000, real_loc[1] / 1000, real_loc[2] / 1000
                     seg_msg.roll, seg_msg.pitch, seg_msg.yaw = 0, 0, yaw
+                    yewes.append(yaw)
             serialized_seg_msg = seg_msg.SerializeToString()
             self.sockets['segment'].send(serialized_seg_msg)
-            logger.info(f'{self.fullname()}, zmq send segmentation message successful, yaw: {yaw}')
+            logger.info(f'{self.fullname()}, zmq send segmentation message successful, yawes: {yewes}')
 
     def _run_post(self) -> None:
         for k, _ in self.sockets.items():

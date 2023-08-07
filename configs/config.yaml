@@ -27,17 +27,18 @@ models:
     platform: pc
     weight: '/home/ycc/Jim/yolov5/models/yolov5n-seg-0724.onnx'
     imgsz: 640
-    obj_threshold: 0.5
+    obj_threshold: 0.7
     nms_threshold: 0.5
 
 cameras:
   realsense:
 
   fish:
-    hub: 4
+    hub: 0
     width: 1600
     height: 1200
     fps: 25
+    distorted: False
 
   doubleFish: True
   fishL:
@@ -45,12 +46,14 @@ cameras:
     width: 1600
     height: 1200
     fps: 25
+    distorted: False
 
   fishR:
     hub: 1
     width: 1600
     height: 1200
     fps: 25
+    distorted: False
 
 connections:
   valid: True

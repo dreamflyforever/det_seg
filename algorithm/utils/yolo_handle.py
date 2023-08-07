@@ -290,23 +290,33 @@ def find_contours(mask):
 
 def calc_angle(bbox):
     # upper-left, upper-right, down-right, down-left
-    p_ul, p_ur, p_dr, p_dl = bbox
-    dist_width = np.linalg.norm(np.array(p_ul) - np.array(p_ur))
-    dist_height = np.linalg.norm(np.array(p_ul) - np.array(p_dl))
-    x_u = (p_ul[0] + p_ur[0]) / 2 if dist_width < dist_height else (p_ul[0] + p_dl[0]) / 2
-    y_u = (p_ul[1] + p_ur[1]) / 2 if dist_width < dist_height else (p_ul[1] + p_dl[1]) / 2
-    x_d = (p_dr[0] + p_dl[0]) / 2 if dist_width < dist_height else (p_ur[0] + p_dr[0]) / 2
-    y_d = (p_dr[1] + p_dl[1]) / 2 if dist_width < dist_height else (p_ur[1] + p_dr[1]) / 2
+    # p_ul, p_ur, p_dr, p_dl = bbox
+    # print(f'p_ul, p_ur, p_dr, p_dl: {p_ul, p_ur, p_dr, p_dl}')
+    p1, p2, p3, p4 = bbox
 
+    dist1 = np.linalg.norm(np.array(p1) - np.array(p2))
+    dist2 = np.linalg.norm(np.array(p1) - np.array(p4))
+
+    # find leftmost or topmost
+    if p1[1] > p3[1] and p1[1] != p2[1]:
+        x_u = (p1[0] + p2[0]) / 2 if dist1 < dist2 else (p2[0] + p3[0]) / 2
+        y_u = (p1[1] + p2[1]) / 2 if dist1 < dist2 else (p2[1] + p3[1]) / 2
+        x_d = (p3[0] + p4[0]) / 2 if dist1 < dist2 else (p1[0] + p4[0]) / 2
+        y_d = (p3[1] + p4[1]) / 2 if dist1 < dist2 else (p1[1] + p4[1]) / 2
+    else:
+        x_u = (p1[0] + p2[0]) / 2 if dist1 < dist2 else (p1[0] + p4[0]) / 2
+        y_u = (p1[1] + p2[1]) / 2 if dist1 < dist2 else (p1[1] + p4[1]) / 2
+        x_d = (p3[0] + p4[0]) / 2 if dist1 < dist2 else (p2[0] + p3[0]) / 2
+        y_d = (p3[1] + p4[1]) / 2 if dist1 < dist2 else (p2[1] + p3[1]) / 2
     if x_u == x_d:
-        yaw = 90
+        yaw = 0
     else:
         dx, dy = x_u - x_d, y_u - y_d
         yaw = np.degrees(np.arctan2(abs(dy), abs(dx)))
         yaw = -yaw if dx * dy < 0 else yaw
         # calc yaw based on y axis
         yaw = 90 - yaw if yaw >= 0 else -(90 + yaw)
-    return yaw
+    return yaw, [x_u, y_u, x_d, y_d]
 
 
 def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
@@ -339,13 +349,14 @@ def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
     vis_img = scale_image(im.shape, im_mask, shape)
 
     for box, center in zip(boxes, centers):
-        yaw = calc_angle(box)
+        yaw, points = calc_angle(box)
         yawes.append(yaw)
 
         if visual:
             cv2.drawContours(vis_img, [box], 0, (255, 255, 255), 2)
 
             theta_rad = math.radians(yaw)
+            # set length for visualization, not hyper-param
             length = 70
             x0, y0 = center[0], center[1]
             x1 = int(x0 - length * math.cos(theta_rad))
@@ -355,8 +366,9 @@ def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
 
             text = str(int(yaw))
             cv2.putText(vis_img, text, (x0 + 10, y0 + 10), FONT, FONT_SCALE, (0, 0, 255), 2, cv2.LINE_AA)
-            cv2.line(vis_img, (x1, y1), (x2, y2), color=(0, 0, 255), thickness=2)
-
+            # cv2.line(vis_img, (x1, y1), (x2, y2), color=(0, 0, 255), thickness=2)
+            cv2.line(vis_img, (int(points[0]), int(points[1])), (int(points[2]), int(points[3])), color=(0, 0, 255),
+                     thickness=2)
     return yawes, centers, vis_img
 
 

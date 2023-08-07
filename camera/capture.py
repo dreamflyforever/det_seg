@@ -197,7 +197,11 @@ class VideoCapture(BusWorker):
         cy = knew[1][2]
         intrins_params = [fx, fy, cx, cy]
         map1, map2 = cv2.fisheye.initUndistortRectifyMap(k, d, np.eye(3), knew, dim, cv2.CV_16SC2)
-        undistorted_img = cv2.remap(img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        undistorted = False
+        if undistorted:
+            undistorted_img = cv2.remap(img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        else:
+            undistorted_img = img
         if imshow:
             cv2.imshow("undistorted", undistorted_img)
         return intrins_params, undistorted_img
