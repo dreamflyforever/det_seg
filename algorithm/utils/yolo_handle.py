@@ -19,7 +19,7 @@ from utils.log import logger
 # device tree for rk356x/rk3588
 DEVICE_COMPATIBLE_NODE = '/proc/device-tree/compatible'
 FONT = cv2.FONT_HERSHEY_SIMPLEX
-FONT_SCALE = 0.8
+FONT_SCALE = 2
 
 
 class Colors:
@@ -317,6 +317,7 @@ def calc_angle(bbox):
         # calc yaw based on y axis
         yaw = 90 - yaw if yaw >= 0 else -(90 + yaw)
     return yaw, [x_u, y_u, x_d, y_d]
+    # return yaw
 
 
 def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
@@ -349,6 +350,7 @@ def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
     vis_img = scale_image(im.shape, im_mask, shape)
 
     for box, center in zip(boxes, centers):
+        # yaw, points = calc_angle(box)
         yaw, points = calc_angle(box)
         yawes.append(yaw)
 
@@ -365,10 +367,10 @@ def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
             y2 = int(y0 + length * math.sin(theta_rad))
 
             text = str(int(yaw))
-            cv2.putText(vis_img, text, (x0 + 10, y0 + 10), FONT, FONT_SCALE, (0, 0, 255), 2, cv2.LINE_AA)
+            cv2.putText(vis_img, text, (x0 + 20, y0 + 20), FONT, FONT_SCALE, (0, 0, 255), 5, cv2.LINE_AA)
             # cv2.line(vis_img, (x1, y1), (x2, y2), color=(0, 0, 255), thickness=2)
             cv2.line(vis_img, (int(points[0]), int(points[1])), (int(points[2]), int(points[3])), color=(0, 0, 255),
-                     thickness=2)
+                     thickness=5)
     return yawes, centers, vis_img
 
 

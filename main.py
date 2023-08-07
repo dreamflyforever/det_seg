@@ -6,6 +6,7 @@
 
 import sys
 import os
+import time
 
 sys.path.append('../pyrobot')
 
@@ -48,15 +49,17 @@ def main():
         det_nms_thres = configs.models.detect.nms_threshold
         det_imgsz = configs.models.detect.imgsz
         detector = YOLOv5DetectWorker(det_weight, det_imgsz, iou_thresh=det_nms_thres, conf_thresh=det_obj_thres)
+        detector.config_in_queue(QueueSettings(mode, 1, True))
+        detector.config_out_queue(QueueSettings(mode, 1, True))
         did = detector.get_service_id()
-        detector.set_running_model(ThreadMode.InProcess)
+        detector.set_running_model(ThreadMode.Threaded)
         detector.start_run()
         BusService.clear_queue(did)
 
         # pull flow
         realsense_cap = RealsenseCapture('RSCap')
-        realsense_cap.config_out_queue(QueueSettings(mode, 25, True))
-        realsense_cap.set_running_model(ThreadMode.InProcess)
+        realsense_cap.config_out_queue(QueueSettings(mode, 1, True))
+        realsense_cap.set_running_model(ThreadMode.Threaded)
         realsense_cap.config()
         realsense_cap.start_run()
         rid = realsense_cap.get_service_id()
@@ -69,6 +72,8 @@ def main():
         seg_nms_thres = configs.models.segment.nms_threshold
         seg_imgsz = configs.models.segment.imgsz
         segmentor = YOLOv5SegmentWorker(seg_weight, seg_imgsz, iou_thresh=seg_nms_thres, conf_thresh=seg_obj_thres)
+        segmentor.config_in_queue(QueueSettings(mode, 1, True))
+        segmentor.config_out_queue(QueueSettings(mode, 1, True))
         sid = segmentor.get_service_id()
         segmentor.set_running_model(ThreadMode.InProcess)
         segmentor.start_run()
@@ -80,8 +85,8 @@ def main():
         fish_cap_fps = configs.cameras.fish.fps
         fish_cap = VideoCapture('FVCap', hub=fish_cap_hub, width=fish_cap_width, height=fish_cap_height,
                                 fps=fish_cap_fps)
-        fish_cap.config_out_queue(QueueSettings(mode, 25, True))
-        fish_cap.set_running_model(ThreadMode.InProcess)
+        fish_cap.config_out_queue(QueueSettings(mode, 1, True))
+        fish_cap.set_running_model(ThreadMode.Threaded)
         fish_cap.config()
         fish_cap.start_run()
         fid = fish_cap.get_service_id()
@@ -173,4 +178,7 @@ def main():
 
 
 if __name__ == '__main__':
+    # import cProfile
+    #
+    # cProfile.run("main()")
     main()

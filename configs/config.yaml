@@ -9,7 +9,7 @@ Develop:
 log:
   log_dir: './logs/'    # ./logs/{data_time}.txt
 
-visualization: False
+visualization: True
 
 models:
   detect:
@@ -36,7 +36,7 @@ cameras:
   realsense:
 
   fish:
-    hub: 0
+    hub: 4
     width: 1600
     height: 1200
     fps: 25

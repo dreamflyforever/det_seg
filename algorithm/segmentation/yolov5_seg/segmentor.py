@@ -195,6 +195,7 @@ class YOLOv5SegmentWorker(BusWorker):
         job_segment_result.intrins_params = job_img.intrins_params
         job_segment_result.copy_tags(job_img)
         self.m_queueFromWorker.put(job_segment_result)
+        return False
 
     def _run_post(self) -> None:
         del self.model
