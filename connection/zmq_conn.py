@@ -163,7 +163,7 @@ class ZMQConnection(BusWorker):
                     real_loc = self.pixe2real(center, fx, fy, cx, cy)
                     count += 1
                     seg_msg.left_pose.seq = count
-                    # seg_msg.data_valid = 1
+                    seg_msg.data_valid = 1
                     seg_msg.left_pose.x, seg_msg.left_pose.y, seg_msg.left_pose.z = real_loc[0] / 1000, real_loc[1] / 1000, real_loc[2] / 1000
                     seg_msg.left_pose.roll, seg_msg.left_pose.pitch, seg_msg.left_pose.yaw = 0, 0, yaw
             serialized_seg_msg = seg_msg.SerializeToString()
