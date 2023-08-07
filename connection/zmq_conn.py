@@ -28,7 +28,8 @@ from concurrency.safe_queue import SafeQueue
 from concurrency.bus import BusWorker, BusService, ServiceId
 from connection.rgbd_proto_pb2 import TargetLocation
 from connection.rgbd_repeat_pb2 import pose_array
-from connection.ArmCamera_pb2 import BottlePose
+#from connection.ArmCamera_pb2 import BottlePose
+from connection.DualArmCamera_pb2 import BottlePoses
 
 
 class JobZMQData(JobPkgBase):
@@ -149,7 +150,8 @@ class ZMQConnection(BusWorker):
             seg_yawes = job_data.yawes
             seg_centers = job_data.centers
             seg_intrins_params = job_data.intrins_params
-            seg_msg = BottlePose()
+            #seg_msg = BottlePose()
+            seg_msg = BottlePoses()
             if len(seg_yawes) == 0:
                 # seg_msg.data_valid = 0
                 logger.info(f'{self.fullname()}, Segmentor: no object be found!')
@@ -160,10 +162,10 @@ class ZMQConnection(BusWorker):
                     fx, fy, cx, cy = seg_intrins_params
                     real_loc = self.pixe2real(center, fx, fy, cx, cy)
                     count += 1
-                    seg_msg.seq = count
+                    seg_msg.left_pose.seq = count
                     # seg_msg.data_valid = 1
-                    seg_msg.x, seg_msg.y, seg_msg.z = real_loc[0] / 1000, real_loc[1] / 1000, real_loc[2] / 1000
-                    seg_msg.roll, seg_msg.pitch, seg_msg.yaw = 0, 0, yaw
+                    seg_msg.left_pose.x, seg_msg.left_pose.y, seg_msg.left_pose.z = real_loc[0] / 1000, real_loc[1] / 1000, real_loc[2] / 1000
+                    seg_msg.left_pose.roll, seg_msg.left_pose.pitch, seg_msg.left_pose.yaw = 0, 0, yaw
             serialized_seg_msg = seg_msg.SerializeToString()
             self.sockets['segment'].send(serialized_seg_msg)
             logger.info(f'{self.fullname()}, zmq send segmentation message successful, yaw: {yaw}')
