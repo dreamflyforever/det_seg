@@ -13,7 +13,7 @@ visualization: False
 
 models:
   detect:
-    valid: True
+    valid: False
     cuda: 0
     port: 0
     platform: pc          # pc(onnx) / rknn(rknn)

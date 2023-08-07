@@ -149,7 +149,7 @@ class ZMQConnection(BusWorker):
             seg_yawes = job_data.yawes
             seg_centers = job_data.centers
             seg_intrins_params = job_data.intrins_params
-            yewes = []
+            zmq_yewes = []
             seg_msg = BottlePoses()
             if len(seg_yawes) == 0:
                 # seg_msg.data_valid = 0
@@ -173,10 +173,10 @@ class ZMQConnection(BusWorker):
                     seg_msg.left_pose.x, seg_msg.left_pose.y, seg_msg.left_pose.z = real_loc[0] / 1000, real_loc[
                         1] / 1000 + 0.03, real_loc[2] / 1000
                     seg_msg.left_pose.roll, seg_msg.left_pose.pitch, seg_msg.left_pose.yaw = 0, 0, yaw
-
+                    zmq_yewes.append(yaw)
             serialized_seg_msg = seg_msg.SerializeToString()
             self.sockets['segment'].send(serialized_seg_msg)
-            logger.info(f'{self.fullname()}-Segmentation, zmq send segmentation message successful, yawes: {yewes}')
+            logger.info(f'{self.fullname()}-Segmentation, zmq send segmentation message successful, yawes: {zmq_yewes}')
 
     def _run_post(self) -> None:
         for k, _ in self.sockets.items():
