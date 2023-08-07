@@ -28,7 +28,7 @@ from concurrency.safe_queue import SafeQueue
 from concurrency.bus import BusWorker, BusService, ServiceId
 from connection.rgbd_proto_pb2 import TargetLocation
 from connection.rgbd_repeat_pb2 import pose_array
-#from connection.ArmCamera_pb2 import BottlePose
+# from connection.ArmCamera_pb2 import BottlePose
 from connection.DualArmCamera_pb2 import BottlePoses
 
 
@@ -140,8 +140,9 @@ class ZMQConnection(BusWorker):
             elif multi_obj:
                 result_vec = np.array(multi_vec)
 
-            logger.info(f'{self.fullname()}, zmq send detection message successful, single obj: {single_obj}, '
-                        f'multi obj: {multi_obj}, local position: {result_vec}')
+            logger.info(
+                f'{self.fullname()}-Detection, zmq send detection message successful, single obj: {single_obj}, '
+                f'multi obj: {multi_obj}, local position: {result_vec}')
 
         # segmentation
         if isinstance(job_data, JobYOLOv5SegResult):
@@ -168,13 +169,14 @@ class ZMQConnection(BusWorker):
                     # yewes.append(yaw)
 
                     seg_msg.left_pose.seq = count
-                    seg_msg.data_valid = 1
-                    seg_msg.left_pose.x, seg_msg.left_pose.y, seg_msg.left_pose.z = real_loc[0] / 1000, real_loc[1] / 1000, real_loc[2] / 1000
+                    seg_msg.left_pose.data_valid = 1
+                    seg_msg.left_pose.x, seg_msg.left_pose.y, seg_msg.left_pose.z = real_loc[0] / 1000, real_loc[
+                        1] / 1000 + 0.03, real_loc[2] / 1000
                     seg_msg.left_pose.roll, seg_msg.left_pose.pitch, seg_msg.left_pose.yaw = 0, 0, yaw
 
             serialized_seg_msg = seg_msg.SerializeToString()
             self.sockets['segment'].send(serialized_seg_msg)
-            logger.info(f'{self.fullname()}, zmq send segmentation message successful, yawes: {yewes}')
+            logger.info(f'{self.fullname()}-Segmentation, zmq send segmentation message successful, yawes: {yewes}')
 
     def _run_post(self) -> None:
         for k, _ in self.sockets.items():

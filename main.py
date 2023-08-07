@@ -38,6 +38,7 @@ def main():
     logger.debug(configs)
 
     mode = QueueType.BASIC
+    visualization = configs.visualization
 
     # load
     if configs.models.detect.valid:
@@ -117,31 +118,32 @@ def main():
         if configs.connections.valid:
             zmq.pump()
 
-        # if configs.models.detect.valid:
-        #     if realsense_cap.m_eof and not BusService.has_complete_job_fetch(rid):
-        #         break
-        #     # read a frame from video when to detect pending queue is not full
-        #     if not BusService.get_queue_app_to_worker(rid).full():
-        #         # get a frame from BusServer(g_CompleteBus)
-        #         realsense_cap_job = cast(JobSharedRealsenseImg, BusService.fetch_complete_job(rid))
-        #         if realsense_cap_job is not None:
-        #             # send a frame to BusServer(g_PendingBus)
-        #             BusService.send_job_to_worker(did, realsense_cap_job)
-        #
-        #     det_job = cast(JobYOLOv5DetResult, BusService.fetch_complete_job(did))
-        #
-        #     if det_job is not None:
-        #         # send to zmq
-        #         if detect_addr is not None and zmq_det_valid:
-        #             BusService.send_job_to_worker(zid, det_job)
-        #
-        #         color_image = det_job.image
-        #         cv2.namedWindow('det', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
-        #         cv2.imshow('det', color_image)
-        #         key = cv2.waitKey(1)
-        #         if key & 0xFF == ord('q') or key == 27:
-        #             cv2.destroyAllWindows()
-        #             break
+        if configs.models.detect.valid:
+            if realsense_cap.m_eof and not BusService.has_complete_job_fetch(rid):
+                break
+            # read a frame from video when to detect pending queue is not full
+            if not BusService.get_queue_app_to_worker(rid).full():
+                # get a frame from BusServer(g_CompleteBus)
+                realsense_cap_job = cast(JobSharedRealsenseImg, BusService.fetch_complete_job(rid))
+                if realsense_cap_job is not None:
+                    # send a frame to BusServer(g_PendingBus)
+                    BusService.send_job_to_worker(did, realsense_cap_job)
+
+            det_job = cast(JobYOLOv5DetResult, BusService.fetch_complete_job(did))
+
+            if det_job is not None:
+                # send to zmq
+                if detect_addr is not None and zmq_det_valid:
+                    BusService.send_job_to_worker(zid, det_job)
+
+                if visualization:
+                    color_image = det_job.image
+                    cv2.namedWindow('det', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+                    cv2.imshow('det', color_image)
+                    key = cv2.waitKey(1)
+                    if key & 0xFF == ord('q') or key == 27:
+                        cv2.destroyAllWindows()
+                        break
 
         if configs.models.segment.valid:
             if fish_cap.m_eof and not BusService.has_complete_job_fetch(fid):
@@ -160,14 +162,14 @@ def main():
                     BusService.send_job_to_worker(zid, seg_job)
 
                 # logger.info(f'{seg_job}')
-
-                color_image = seg_job.image
-                cv2.namedWindow('seg', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
-                cv2.imshow('seg', color_image)
-                key = cv2.waitKey(1)
-                if key & 0xFF == ord('q') or key == 27:  # 执行时，按q或esc退出
-                    cv2.destroyAllWindows()
-                    break
+                if visualization:
+                    color_image = seg_job.image
+                    cv2.namedWindow('seg', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+                    cv2.imshow('seg', color_image)
+                    key = cv2.waitKey(1)
+                    if key & 0xFF == ord('q') or key == 27:  # 执行时，按q或esc退出
+                        cv2.destroyAllWindows()
+                        break
 
 
 if __name__ == '__main__':

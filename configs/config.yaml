@@ -9,6 +9,8 @@ Develop:
 log:
   log_dir: './logs/'    # ./logs/{data_time}.txt
 
+visualization: False
+
 models:
   detect:
     valid: True
