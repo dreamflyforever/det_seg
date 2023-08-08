@@ -320,19 +320,19 @@ def calc_angle(bbox):
     # return yaw
 
 
-def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
-    vis_colors = [colors(x, True) for x in det[:, 5]]
-    vis_colors = np.array(vis_colors, dtype=np.float32) / 255.0
-    vis_colors = vis_colors[:, np.newaxis, np.newaxis]
-
+def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True, visual_mask=False):
     new_masks = np.transpose(masks, (1, 2, 0))
     masks = masks[:, :, :, np.newaxis]
-    masks_color = masks * (vis_colors * alpha)
-    inv_alph_masks = (1 - masks * alpha).cumprod(0)  # shape(n,h,w,1)
-    mcs = (masks_color * inv_alph_masks).sum(0) * 2  # mask color summand shape(n,h,w,3)
-
     im = im[:, :, ::-1]
-    im = im * inv_alph_masks[-1] + mcs
+
+    if visual_mask:
+        vis_colors = [colors(x, True) for x in det[:, 5]]
+        vis_colors = np.array(vis_colors, dtype=np.float32) / 255.0
+        vis_colors = vis_colors[:, np.newaxis, np.newaxis]
+        masks_color = masks * (vis_colors * alpha)
+        inv_alph_masks = (1 - masks * alpha).cumprod(0)  # shape(n,h,w,1)
+        mcs = (masks_color * inv_alph_masks).sum(0) * 2  # mask color summand shape(n,h,w,3)
+        im = im * inv_alph_masks[-1] + mcs
     im_mask = (im * 255).astype(np.uint8)
 
     # resize mask to original size
@@ -350,25 +350,15 @@ def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
     vis_img = scale_image(im.shape, im_mask, shape)
 
     for box, center in zip(boxes, centers):
-        # yaw, points = calc_angle(box)
         yaw, points = calc_angle(box)
         yawes.append(yaw)
 
         if visual:
             cv2.drawContours(vis_img, [box], 0, (255, 255, 255), 2)
-
-            theta_rad = math.radians(yaw)
-            # set length for visualization, not hyper-param
-            length = 70
             x0, y0 = center[0], center[1]
-            x1 = int(x0 - length * math.cos(theta_rad))
-            y1 = int(y0 - length * math.sin(theta_rad))
-            x2 = int(x0 + length * math.cos(theta_rad))
-            y2 = int(y0 + length * math.sin(theta_rad))
-
             text = str(int(yaw))
             cv2.putText(vis_img, text, (x0 + 20, y0 + 20), FONT, FONT_SCALE, (0, 0, 255), 5, cv2.LINE_AA)
-            # cv2.line(vis_img, (x1, y1), (x2, y2), color=(0, 0, 255), thickness=2)
+            cv2.circle(vis_img, (x0, y0), 5, (0, 255, 0), thickness=10)
             cv2.line(vis_img, (int(points[0]), int(points[1])), (int(points[2]), int(points[3])), color=(0, 0, 255),
                      thickness=5)
     return yawes, centers, vis_img

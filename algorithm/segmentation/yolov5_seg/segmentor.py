@@ -185,7 +185,7 @@ class YOLOv5SegmentWorker(BusWorker):
         dets_per_img, masks_per_img = self._postprocess(pred, proto, img.shape[:2], ori_img.shape[:2])
         if len(dets_per_img):
             yawes, centers, vis_img = yolo_handle.seg_process(self.colors, dets_per_img[0], masks_per_img[0], img,
-                                                              ori_img.shape)
+                                                              ori_img.shape, visual=True, visual_mask=False)
             job_segment_result = JobYOLOv5SegResult(image=vis_img.copy(), detection=dets_per_img, masks=masks_per_img,
                                                     intrins_params=job_img.intrins_params, yawes=yawes,
                                                     centers=centers, )
