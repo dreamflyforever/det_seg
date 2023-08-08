@@ -72,7 +72,8 @@ class JobSharedCapImg(JobPkgBase):
 
 
 class VideoCapture(BusWorker):
-    def __init__(self, name: str, hub: int = 0, width: int = 1600, height: int = 1200, fps: int = 25):
+    def __init__(self, name: str, hub: int = 0, width: int = 1600, height: int = 1200, fps: int = 25,
+                 k: list = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], d: list = [[0], [0], [0], [0]]):
         super().__init__(ServiceId.FISH_CAPTURE, name)
         self.m_eof = False
         self.m_cam_id = 0
@@ -89,6 +90,12 @@ class VideoCapture(BusWorker):
         self.config_out_queue(QueueSettings(QueueType.BASIC, 25, True))
         self.m_cap: cv2.VideoCapture | None = None
         self.m_skip_frame = 0
+
+        self.k = np.array(k)
+        self.d = np.array(d)
+        self.dim = (self.m_width, self.m_height)
+        self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(self.k, self.d, np.eye(3), self.k.copy(), self.dim,
+                                                                   cv2.CV_16SC2)
 
     # gpu also sames as rknn
     def config(self, url: str = '', cam_id: int = 0, gpu: int = -1) -> None:
@@ -174,23 +181,8 @@ class VideoCapture(BusWorker):
         self.m_skip_frame = skip_frame
 
     def fish_cam_undistort(self, img, scale=1.0, imshow=False, zc=True):
-        k, d, dim = None, None, None
-        if zc:
-            ## fov-200
-            # k = np.array(
-            #     [[363.98953227211905, 0.0, 834.3158978931784], [0.0, 363.9524177963977, 650.107887396256],
-            #      [0.0, 0.0, 1.0]])
-            # d = np.array(
-            #     [[0.002653439135043621], [-0.010520573385910588], [0.00144632201051458], [-0.0008507916189458718]])
-
-            ## fov-100
-            k = np.array([[812.0759926090558, 0.0, 810.3963949199671], [0.0, 813.5716912856911, 606.0612337205697],
-                          [0.0, 0.0, 1.0]])
-            d = np.array([[0.5033714773685056], [0.12237339795797722], [-0.41302582292485795], [0.4501049351340188]])
-            dim = (1600, 1200)
-
+        k, d, dim = self.k, self.d, (self.m_width, self.m_height)
         dim1 = img.shape[:2][::-1]  # dim1 is the dimension of input image to un-distort
-        # assert dim1[0]/dim1[1] == DIM[0]/DIM[1], "Image to undistort needs to have same aspect ratio as the ones used in calibration"
         if dim1[0] != dim[0]:
             img = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
         knew = k.copy()
@@ -202,10 +194,10 @@ class VideoCapture(BusWorker):
         cx = knew[0][2]
         cy = knew[1][2]
         intrins_params = [fx, fy, cx, cy]
-        map1, map2 = cv2.fisheye.initUndistortRectifyMap(k, d, np.eye(3), knew, dim, cv2.CV_16SC2)
         undistorted = True
         if undistorted:
-            undistorted_img = cv2.remap(img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+            undistorted_img = cv2.remap(img, self.map1, self.map2, interpolation=cv2.INTER_LINEAR,
+                                        borderMode=cv2.BORDER_CONSTANT)
         else:
             undistorted_img = img
         if imshow:

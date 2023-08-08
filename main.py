@@ -52,7 +52,7 @@ def main():
         detector.config_in_queue(QueueSettings(mode, 1, True))
         detector.config_out_queue(QueueSettings(mode, 1, True))
         did = detector.get_service_id()
-        detector.set_running_model(ThreadMode.Threaded)
+        detector.set_running_model(ThreadMode.InProcess)
         detector.start_run()
         BusService.clear_queue(did)
 
@@ -83,8 +83,10 @@ def main():
         fish_cap_width = configs.cameras.fish.width
         fish_cap_height = configs.cameras.fish.height
         fish_cap_fps = configs.cameras.fish.fps
+        fish_cap_k = configs.cameras.fish.k
+        fish_cap_d = configs.cameras.fish.d
         fish_cap = VideoCapture('FVCap', hub=fish_cap_hub, width=fish_cap_width, height=fish_cap_height,
-                                fps=fish_cap_fps)
+                                fps=fish_cap_fps, k=fish_cap_k, d=fish_cap_d)
         fish_cap.config_out_queue(QueueSettings(mode, 1, True))
         fish_cap.set_running_model(ThreadMode.Threaded)
         fish_cap.config()
