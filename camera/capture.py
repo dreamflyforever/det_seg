@@ -176,12 +176,16 @@ class VideoCapture(BusWorker):
     def fish_cam_undistort(self, img, scale=1.0, imshow=False, zc=True):
         k, d, dim = None, None, None
         if zc:
+            ## fov-200
             # k = np.array(
             #     [[363.98953227211905, 0.0, 834.3158978931784], [0.0, 363.9524177963977, 650.107887396256],
             #      [0.0, 0.0, 1.0]])
             # d = np.array(
             #     [[0.002653439135043621], [-0.010520573385910588], [0.00144632201051458], [-0.0008507916189458718]])
-	    k = np.array([[812.0759926090558, 0.0, 810.3963949199671], [0.0, 813.5716912856911, 606.0612337205697], [0.0, 0.0, 1.0]])
+
+            ## fov-100
+            k = np.array([[812.0759926090558, 0.0, 810.3963949199671], [0.0, 813.5716912856911, 606.0612337205697],
+                          [0.0, 0.0, 1.0]])
             d = np.array([[0.5033714773685056], [0.12237339795797722], [-0.41302582292485795], [0.4501049351340188]])
             dim = (1600, 1200)
 
@@ -199,7 +203,7 @@ class VideoCapture(BusWorker):
         cy = knew[1][2]
         intrins_params = [fx, fy, cx, cy]
         map1, map2 = cv2.fisheye.initUndistortRectifyMap(k, d, np.eye(3), knew, dim, cv2.CV_16SC2)
-        undistorted = False
+        undistorted = True
         if undistorted:
             undistorted_img = cv2.remap(img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         else:

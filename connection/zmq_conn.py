@@ -159,7 +159,7 @@ class ZMQConnection(BusWorker):
                 for i, (yaw, center) in enumerate(zip(seg_yawes, seg_centers)):
                     logger.info(f'{i} object, yaw: {yaw}, center: {center}')
                     fx, fy, cx, cy = seg_intrins_params
-                    real_loc = self.pixe2real(center, fx, fy, cx, cy)
+                    real_loc = self.pix2real(center, fx, fy, cx, cy)
                     count += 1
 
                     # seg_msg.seq = count
@@ -286,8 +286,8 @@ class ZMQConnection(BusWorker):
         return loc_re
 
     @staticmethod
-    def pixe2real(p_in, fx, fy, cx, cy):
-        h = 375
+    def pix2real(p_in, fx, fy, cx, cy):
+        h = 310 - 30
         p_out = [0, 0, 0]
         p_out[0] = ((p_in[0] - cx) / fx) * h
         p_out[1] = ((p_in[1] - cy) / fy) * h

@@ -126,7 +126,7 @@ class YOLOv5SegmentWorker(BusWorker):
             elif self.onnx:
                 self.model.run(self.onnx_outputs, {self.onnx_input: img})
             else:
-                self.model.inference(inputs=[img[0]])
+                self.model.inference(inputs=[img])
             this_time = time.time() - tick
             if abs(this_time - prev_time) / prev_time < 0.05:
                 break
