@@ -13,11 +13,11 @@ visualization: True
 
 models:
   detect:
-    valid: False
+    valid: True
     cuda: 0
     port: 0
     platform: pc          # pc(onnx) / rknn(rknn)
-#    weight: 'algorithm/weights/yolov5s-det-0724-noquan.rknn'
+    #    weight: 'algorithm/weights/yolov5s-det-0724-noquan.rknn'
     weight: '/home/ycc/Jim/yolov5/models/yolov5s-det-0728.onnx'
     imgsz: 640
     obj_threshold: 0.5
@@ -28,7 +28,7 @@ models:
     cuda: 0
     port: 1
     platform: pc
-#    weight: 'algorithm/weights/yolov5n-seg-0724-noquan.rknn'
+    #    weight: 'algorithm/weights/yolov5n-seg-0724-noquan.rknn'
     weight: '/home/ycc/Jim/yolov5/models/yolov5n-seg-0724.onnx'
     imgsz: 640
     obj_threshold: 0.7
@@ -42,7 +42,9 @@ cameras:
     width: 1600
     height: 1200
     fps: 25
-    distorted: False
+    distorted: True
+    k: [[812.0759926090558, 0.0, 810.3963949199671], [0.0, 813.5716912856911, 606.0612337205697], [0.0, 0.0, 1.0]]
+    d: [[0.5033714773685056], [0.12237339795797722], [-0.41302582292485795], [0.4501049351340188]]
 
   doubleFish: True
   fishL:
