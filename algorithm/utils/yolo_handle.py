@@ -331,8 +331,8 @@ def seg_process(colors, det, masks, im, shape, alpha=0.5, visual=True):
     inv_alph_masks = (1 - masks * alpha).cumprod(0)  # shape(n,h,w,1)
     mcs = (masks_color * inv_alph_masks).sum(0) * 2  # mask color summand shape(n,h,w,3)
 
-    im = im * inv_alph_masks[-1] + mcs
     im = im[:, :, ::-1]
+    im = im * inv_alph_masks[-1] + mcs
     im_mask = (im * 255).astype(np.uint8)
 
     # resize mask to original size

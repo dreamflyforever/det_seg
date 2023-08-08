@@ -178,6 +178,7 @@ class YOLOv5SegmentWorker(BusWorker):
             outputs = self.model.run(self.onnx_outputs, {self.onnx_input: np.transpose(img, (2, 0, 1))[None]})
         else:
             outputs = self.model.inference(inputs=[img])  # RKNN
+            img /= 255.
         pred, proto = outputs
         if self.rknn:
             pred = np.squeeze(pred, axis=-1)
