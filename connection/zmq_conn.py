@@ -159,7 +159,7 @@ class ZMQConnection(BusWorker):
                 for i, (yaw, center) in enumerate(zip(seg_yawes, seg_centers)):
                     logger.info(f'{i} object, yaw: {yaw}, center: {center}')
                     fx, fy, cx, cy = seg_intrins_params
-                    real_loc = self.pix2real(center, fx, fy, cx, cy)
+                    real_loc = self.pix2real_with_repair(center, fx, fy, cx, cy)
                     count += 1
 
                     # seg_msg.seq = count
@@ -294,3 +294,26 @@ class ZMQConnection(BusWorker):
         p_out[2] = 1.0 * h
         p_out = tuple(p_out)
         return p_out
+
+    def pix2real_with_repair(self, p_in, fx, fy, cx, cy):
+        h = 310 - 30
+        p_out = [0, 0, 0]
+        p_out[0] = ((p_in[0] - cx) / fx) * h
+        p_out[1] = ((p_in[1] - cy) / fy) * h
+        p_out[2] = 1.0 * h
+
+        px, py = p_in
+        offset_x = self.gaussian_compensation(px, u=800)
+        offset_x = -offset_x if px < 800 else offset_x
+        offset_y = self.gaussian_compensation(py, u=600)
+        offset_y = -offset_y if px < 600 else offset_y
+        p_out[0] += offset_x
+        p_out[1] += offset_y
+        p_out = tuple(p_out)
+        return p_out
+
+    @staticmethod
+    def gaussian_compensation(x, u, sigma=300, offset_max=2.5):
+        gauss = np.exp(-((x - u) ** 2) / (2 * sigma ** 2))
+        offset = offset_max * gauss
+        return offset_max - offset
