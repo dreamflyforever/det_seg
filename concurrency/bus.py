@@ -33,6 +33,7 @@ class ServiceId(enum.IntEnum):
 
     CONNECT = 600
     ZMQ = 601
+    ZMQ_CS = 602
 
     @staticmethod
     def all_ids() -> tuple:

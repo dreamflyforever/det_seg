@@ -26,6 +26,7 @@ from concurrency.thread_runner import ThreadRunner, ThreadMode
 from camera.realsense import RealsenseCapture, JobSharedRealsenseImg
 from camera.capture import VideoCapture, JobSharedCapImg
 from connection.zmq_conn import ZMQConnection
+from connection.zmq_cs_conn import ZMQCSConnection, JobCSZMQData, CSAGAIN
 
 # debug
 from concurrency.bus import g_PendingBus, g_CompleteBus
@@ -106,15 +107,24 @@ def main():
     if len(segment_addr) > 0:
         zmq_addrs['segment'] = segment_addr
         zmq_seg_valid = True
+
     if len(zmq_addrs.keys()) > 0:
-        zmq = ZMQConnection('connections', zmq_addrs)
-        zmq.set_running_model(ThreadMode.Threaded)
-        zmq.start_run()
-        zid = zmq.get_service_id()
-        BusService.clear_queue(zid)
+        # only segment
+        pb_zmq = ZMQConnection('connections-segment', zmq_addrs)
+        pb_zmq.set_running_model(ThreadMode.Threaded)
+        pb_zmq.start_run()
+        pb_zid = pb_zmq.get_service_id()
+        BusService.clear_queue(pb_zid)
+
+    if len(zmq_addrs.keys()) > 0:
+        cs_zmq = ZMQCSConnection('connections-detect', zmq_addrs)
+        cs_zmq.set_running_model(ThreadMode.Threaded)
+        cs_zmq.start_run()
+        cs_zid = cs_zmq.get_service_id()
+        BusService.clear_queue(cs_zid)
 
     need_stop = False
-
+    cs_recv = False
     while not need_stop:
         if configs.models.detect.valid:
             realsense_cap.pump()  # get a frame from realsense to BusServer(g_CompleteBus)
@@ -123,34 +133,43 @@ def main():
             fish_cap.pump()
             segmentor.pump()  # get a frame from BusServer()
         if configs.connections.valid:
-            zmq.pump()
+            pb_zmq.pump()
+            cs_zmq.pump()
 
         if configs.models.detect.valid:
-            if realsense_cap.m_eof and not BusService.has_complete_job_fetch(rid):
-                break
-            # read a frame from video when to detect pending queue is not full
-            if not BusService.get_queue_app_to_worker(rid).full():
-                # get a frame from BusServer(g_CompleteBus)
-                realsense_cap_job = cast(JobSharedRealsenseImg, BusService.fetch_complete_job(rid))
-                if realsense_cap_job is not None:
-                    # send a frame to BusServer(g_PendingBus)
-                    BusService.send_job_to_worker(did, realsense_cap_job)
-
-            det_job = cast(JobYOLOv5DetResult, BusService.fetch_complete_job(did))
-
-            if det_job is not None:
-                # send to zmq
-                if detect_addr is not None and zmq_det_valid:
-                    BusService.send_job_to_worker(zid, det_job)
-
-                if visualization:
-                    color_image = det_job.image
-                    cv2.namedWindow('det', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
-                    cv2.imshow('det', color_image)
-                    key = cv2.waitKey(1)
-                    if key & 0xFF == ord('q') or key == 27:
-                        cv2.destroyAllWindows()
+            # from zmq
+            if not BusService.get_queue_app_to_worker(cs_zid).full():
+                recv_cs_job = cast(JobCSZMQData, BusService.fetch_complete_job(cs_zid))
+                if recv_cs_job is not None or cs_recv:
+                    cs_recv = True
+                    if realsense_cap.m_eof and not BusService.has_complete_job_fetch(rid):
                         break
+                    # read a frame from video when to detect pending queue is not full
+                    if not BusService.get_queue_app_to_worker(rid).full():
+                        # get a frame from BusServer(g_CompleteBus)
+                        realsense_cap_job = cast(JobSharedRealsenseImg, BusService.fetch_complete_job(rid))
+                        if realsense_cap_job is not None:
+                            # send a frame to BusServer(g_PendingBus)
+                            BusService.send_job_to_worker(did, realsense_cap_job)
+
+                    det_job = cast(JobYOLOv5DetResult, BusService.fetch_complete_job(did))
+
+                    if det_job is not None:
+                        # send to zmq
+                        if detect_addr is not None and zmq_det_valid:
+                            # BusService.send_job_to_worker(zid, det_job)
+                            cs_zmq.send_data(det_job)
+                            cs_recv = False
+                            CSAGAIN[0] = True
+
+                        if visualization:
+                            color_image = det_job.image
+                            cv2.namedWindow('det', flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+                            cv2.imshow('det', color_image)
+                            key = cv2.waitKey(1)
+                            if key & 0xFF == ord('q') or key == 27:
+                                cv2.destroyAllWindows()
+                                break
 
         if configs.models.segment.valid:
             if fish_cap.m_eof and not BusService.has_complete_job_fetch(fid):

@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-# @Time: 2023/6/30 上午10:17
+# @Time: 2023/8/10 下午3:38
 # @Author: YANG.C
-# @File: zmq_conn.py
+# @File: zmq_cs_conn.py
 
 from __future__ import annotations
 
 import os
 import sys
+import time
 
 from typing import List, cast
 import math
@@ -30,25 +31,22 @@ from connection.rgbd_proto_pb2 import TargetLocation
 from connection.rgbd_repeat_pb2 import pose_array
 # from connection.ArmCamera_pb2 import BottlePose
 from connection.DualArmCamera_pb2 import BottlePoses
+from connection.Camera2Robot_pb2 import *
+from connection.CameraBottle2Robot_pb2 import *
+
+CSAGAIN = [True]
 
 
-class JobZMQData(JobPkgBase):
-    def __init__(self, det_time: int, det_frame_id: int, det_xyzs: List[list],
-                 seg_time: int, seg_frame_id: int, seg_yawes: List[float | int], seg_centers: List[List[int, int]]):
+class JobCSZMQData(JobPkgBase):
+    def __init__(self, recv_time: int, recv_event: int):
         super().__init__()
-        self.det_time = det_time
-        self.det_frame_id = det_frame_id
-        self.seg_time = seg_time
-        self.seg_frame_id = seg_frame_id
-        self.det_xyzs = det_xyzs
-        self.seg_yawes = seg_yawes
-        self.seg_centers = seg_centers
-        self.intrins_params = None
+        self.recv_time = recv_time
+        self.recv_event = recv_event
 
 
-class ZMQConnection(BusWorker):
+class ZMQCSConnection(BusWorker):
     def __init__(self, name: str, addrs: dict):
-        super().__init__(ServiceId.ZMQ, name)
+        super().__init__(ServiceId.ZMQ_CS, name)
         self.addrs = addrs
         self.sockets = {}
         self.context = zmq.Context()
@@ -65,21 +63,37 @@ class ZMQConnection(BusWorker):
                 if len(v) is None:
                     logger.info(f'{self.fullname()}, the [{k}] task has invalid zmq config, please check it.')
                 else:
-                    if k == 'segment':
-                        self.sockets[k] = self.context.socket(zmq.PUB)
+                    if k == 'detect':
+                        self.sockets[k] = self.context.socket(zmq.REP)
                         self.sockets[k].bind(v)
                         logger.info(f'{self.fullname()}, the [{k}] task valid, bond on [{v}]')
         except Exception as error:
             raise error
 
     def _run_pump(self) -> bool:
-        if not self.m_queueFromWorker.empty():
-            return True
-        if self.m_queueToWorker.empty():
-            return True
-        job_data = self.m_queueToWorker.get()
-        if job_data is None:
-            return True
+        global CSAGAIN
+        if CSAGAIN[0]:
+            logger.warning(f'{self.fullname()}, listen client...')
+            recv = CameraBottle2RobotRequest()
+            msg_request = self.sockets['detect'].recv(copy=True)
+            CSAGAIN[0] = False
+            recv.ParseFromString(msg_request)
+            logger.info(f'recv event: {recv.event}')
+            recv_time = time.time() * 1e3
+            recv_event = recv.event
+            event_job = JobCSZMQData(recv_time, recv_event)
+            event_job.recv_time = recv_time
+            self.m_queueFromWorker.put(event_job)
+            time.sleep(5 / 1000)
+
+    def send_data(self, job_data) -> bool:
+        # if not self.m_queueFromWorker.empty():
+        #     return True
+        # if self.m_queueToWorker.empty():
+        #     return True
+        # job_data = self.m_queueToWorker.get()
+        # if job_data is None:
+        #     return True
 
         # detection
         if isinstance(job_data, JobYOLOv5DetResult):
@@ -95,7 +109,8 @@ class ZMQConnection(BusWorker):
             multi_obj = True
             multi_vec = []
             if single_obj:
-                det_msg = TargetLocation()
+                # det_msg = TargetLocation()
+                det_msg = FindBottleReply()
                 det_msg.seq = job_data.frame_id
                 det_msg.ts = job_data.time_stamp
                 if len(det_xyzs) == 0:
@@ -111,20 +126,25 @@ class ZMQConnection(BusWorker):
                     det_msg.x2 = loc_re[0] - self.camera_dis
                     det_msg.y2 = loc_re[1] + self.robot_length - self.shot_dis
                     det_msg.z2 = loc_re[2] - self.robot_height
+
             if multi_obj:
-                det_msg = pose_array()
+                c = CameraBottle2RobotReply()
+                c.error.flag = True
+                det_msg = FindBottleReply()
                 if len(det_xyzs) == 0:
-                    p = det_msg.pose.add()
-                    p.seq = job_data.frame_id
-                    p.ts = job_data.time_stamp
+                    c.seq = job_data.frame_id
+                    c.ts = job_data.time_stamp
+                    p = det_msg.poses.pose.add()
                     p.x1, p.y1, p.z1 = 9999, 9999, 9999
                     p.x2, p.y2, p.z2 = 9999, 9999, 9999
+                    mark = c.data
+                    mark.Pack(det_msg)
                     logger.info(f'{self.fullname()}, Detector: no object be found!')
                 else:
                     for i in range(len(det_xyzs)):
-                        p = det_msg.pose.add()
-                        p.seq = job_data.frame_id
-                        p.ts = job_data.time_stamp
+                        c.seq = job_data.frame_id
+                        c.ts = job_data.time_stamp
+                        p = det_msg.poses.pose.add()
                         p.x1 = -det_xyzs[i][0]
                         p.y1 = det_xyzs[i][2]
                         p.z1 = det_xyzs[i][1]
@@ -133,8 +153,38 @@ class ZMQConnection(BusWorker):
                         p.y2 = loc_re[1] + self.robot_length - self.shot_dis
                         p.z2 = loc_re[2] - self.robot_height
                         multi_vec.append([p.x1, p.y1, p.z1])
-            serialized_det_msg = det_msg.SerializeToString()
+                        mark = c.data
+                        mark.Pack(det_msg)
+            # if multi_obj:
+            #     det_msg = pose_array()
+            #     if len(det_xyzs) == 0:
+            #         p = det_msg.pose.add()
+            #         p.seq = job_data.frame_id
+            #         p.ts = job_data.time_stamp
+            #         p.x1, p.y1, p.z1 = 9999, 9999, 9999
+            #         p.x2, p.y2, p.z2 = 9999, 9999, 9999
+            #         logger.info(f'{self.fullname()}, Detector: no object be found!')
+            #     else:
+            #         for i in range(len(det_xyzs)):
+            #             p = det_msg.pose.add()
+            #             p.seq = job_data.frame_id
+            #             p.ts = job_data.time_stamp
+            #             p.x1 = -det_xyzs[i][0]
+            #             p.y1 = det_xyzs[i][2]
+            #             p.z1 = det_xyzs[i][1]
+            #             loc_re = self.location_translation(-p.x1, p.y1, p.z1, 0)
+            #             p.x2 = loc_re[0] - self.camera_dis
+            #             p.y2 = loc_re[1] + self.robot_length - self.shot_dis
+            #             p.z2 = loc_re[2] - self.robot_height
+            #             multi_vec.append([p.x1, p.y1, p.z1])
+            serialized_det_msg = c.SerializeToString()
+            # logger.info(f'ser msg: {serialized_det_msg}')
+            # c = CameraBottle2RobotReply()
+            # c.seq = 1
+            # c.error.flag = True
+            # msg = c.SerializeToString()
             self.sockets['detect'].send(serialized_det_msg)
+            # self.sockets['detect'].send(serialized_det_msg)
 
             if single_obj:
                 result_vec = np.array([det_msg.x1, det_msg.y1, det_msg.z1])
@@ -145,46 +195,12 @@ class ZMQConnection(BusWorker):
                 f'{self.fullname()}-Detection, zmq send detection message successful, single obj: {single_obj}, '
                 f'multi obj: {multi_obj}, local position: {result_vec}')
 
-        # segmentation
-        if isinstance(job_data, JobYOLOv5SegResult):
-            seg_yawes = job_data.yawes
-            seg_centers = job_data.centers
-            seg_intrins_params = job_data.intrins_params
-            zmq_yewes = []
-            seg_msg = BottlePoses()
-            if len(seg_yawes) == 0:
-                # seg_msg.data_valid = 0
-                logger.info(f'{self.fullname()}, Segmentor: no object be found!')
-            else:
-                count = -1
-                for i, (yaw, center) in enumerate(zip(seg_yawes, seg_centers)):
-                    logger.info(f'{i} object, yaw: {yaw}, center: {center}')
-                    fx, fy, cx, cy = seg_intrins_params
-                    real_loc = self.pix2real_with_repair(center, fx, fy, cx, cy)
-                    count += 1
-
-                    # seg_msg.seq = count
-                    # # seg_msg.data_valid = 1
-                    # seg_msg.x, seg_msg.y, seg_msg.z = real_loc[0] / 1000, real_loc[1] / 1000, real_loc[2] / 1000
-                    # seg_msg.roll, seg_msg.pitch, seg_msg.yaw = 0, 0, yaw
-                    # yewes.append(yaw)
-
-                    seg_msg.left_pose.seq = count
-                    seg_msg.left_pose.data_valid = 1
-                    seg_msg.left_pose.x, seg_msg.left_pose.y, seg_msg.left_pose.z = real_loc[0] / 1000, real_loc[
-                        1] / 1000 + 0.03, real_loc[2] / 1000
-                    seg_msg.left_pose.roll, seg_msg.left_pose.pitch, seg_msg.left_pose.yaw = 0, 0, yaw
-                    zmq_yewes.append(yaw)
-            serialized_seg_msg = seg_msg.SerializeToString()
-            self.sockets['segment'].send(serialized_seg_msg)
-            logger.info(f'{self.fullname()}-Segmentation, zmq send segmentation message successful, yawes: {zmq_yewes}')
+    def get_supported_mode(self) -> ThreadMode:
+        return ThreadMode.AllModes
 
     def _run_post(self) -> None:
         for k, _ in self.sockets.items():
             del self.sockets[k]
-
-    def get_supported_mode(self) -> ThreadMode:
-        return ThreadMode.AllModes
 
     @staticmethod
     def pickle_camera_params(depth_intrin):

@@ -1,0 +1,62 @@
+// See README.txt for information and build instructions.
+//
+// Note: START and END tags are used in comments to define sections used in
+// tutorials.  They are not part of the syntax for Protocol Buffers.
+//
+// To get an in-depth walkthrough of this file and the related examples, see:
+// https://developers.google.com/protocol-buffers/docs/tutorials
+
+// [START declaration]
+
+//
+// create by wxc on 2023.6.29
+//
+
+syntax = "proto3";
+package mpb_com;
+
+// import "Pose.proto";
+import "Header.proto";
+import "google/protobuf/any.proto";
+
+message Position {
+  float x = 1;
+  float y = 2;
+  float yaw = 3;
+  float confidence = 4;
+}
+
+message FindBasestationRequest {
+  Header header = 1;
+  int32 times = 2;
+}
+
+message FindBasestationReply {
+  Header header = 1;
+  Position position = 2;
+}
+
+message ErrorMsg {
+  bool flag = 1;        // true - 发生异常 , flase - 没有异常
+  string error_msg = 2; // 异常说明
+}
+
+enum CameraEvent {
+  // 相机相关-----------------comment-------Request.param----------Reply.data
+  FIND_BASESTATION =
+      0; //  获取基站位置       FindBasestationRequest FindBasestationReply
+
+  // 支持事件总数最大值
+  EVENT_MAX = 99;
+}
+
+// Camera控制服务请求(service:"/camera2_robot")
+message Camera2RobotRequest {
+  CameraEvent event = 1;
+  google.protobuf.Any param = 2; // 参数
+}
+
+message Camera2RobotReply {
+  ErrorMsg error = 1;
+  google.protobuf.Any data = 2; // 数据
+}
