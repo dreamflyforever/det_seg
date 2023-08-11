@@ -125,6 +125,7 @@ def main():
 
     need_stop = False
     cs_recv = False
+    cs_pull_flow = False 
     while not need_stop:
         if configs.models.detect.valid:
             realsense_cap.pump()  # get a frame from realsense to BusServer(g_CompleteBus)
@@ -145,12 +146,13 @@ def main():
                     if realsense_cap.m_eof and not BusService.has_complete_job_fetch(rid):
                         break
                     # read a frame from video when to detect pending queue is not full
-                    if not BusService.get_queue_app_to_worker(rid).full():
+                    if not BusService.get_queue_app_to_worker(rid).full() and not cs_pull_flow:
                         # get a frame from BusServer(g_CompleteBus)
                         realsense_cap_job = cast(JobSharedRealsenseImg, BusService.fetch_complete_job(rid))
                         if realsense_cap_job is not None:
                             # send a frame to BusServer(g_PendingBus)
                             BusService.send_job_to_worker(did, realsense_cap_job)
+                            cs_pull_flow = True
 
                     det_job = cast(JobYOLOv5DetResult, BusService.fetch_complete_job(did))
 
@@ -161,6 +163,11 @@ def main():
                             cs_zmq.send_data(det_job)
                             cs_recv = False
                             CSAGAIN[0] = True
+                            cs_pull_flow = False 
+                            # if len(det_job.detections) > 0:
+                            # 	cv2.imwrite(f'obj/{time.time() * 1e3}.jpg', det_job.image)
+                            # else:
+                            #     cv2.imwrite(f'noobj/{time.time() * 1e3}.jpg', det_job.image)
 
                         if visualization:
                             color_image = det_job.image

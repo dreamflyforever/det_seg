@@ -13,6 +13,7 @@ from typing import List, cast
 import math
 
 import numpy as np
+import cv2
 
 zmq_base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(zmq_base)
@@ -141,6 +142,7 @@ class ZMQCSConnection(BusWorker):
                     mark.Pack(det_msg)
                     logger.info(f'{self.fullname()}, Detector: no object be found!')
                 else:
+                    img = job_data.image
                     for i in range(len(det_xyzs)):
                         c.seq = job_data.frame_id
                         c.ts = job_data.time_stamp
@@ -152,9 +154,13 @@ class ZMQCSConnection(BusWorker):
                         p.x2 = loc_re[0] - self.camera_dis
                         p.y2 = loc_re[1] + self.robot_length - self.shot_dis
                         p.z2 = loc_re[2] - self.robot_height
-                        multi_vec.append([p.x1, p.y1, p.z1])
+                        multi_vec.append([p.x2, p.y2, p.z2])
                         mark = c.data
                         mark.Pack(det_msg)
+                        text = f'{p.x2}, {p.y2}, {p.z2}'
+                        cv2.putText(img, text, (int(detections[i][0]) + 20, int(detections[i][1]) + 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 5, cv2.LINE_AA)
+                    cv2.imwrite(f'obj/{time.time() * 1e3}.jpg', img)
+
             # if multi_obj:
             #     det_msg = pose_array()
             #     if len(det_xyzs) == 0:

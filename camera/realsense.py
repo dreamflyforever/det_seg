@@ -28,6 +28,8 @@ from concurrency.thread_runner import ThreadRunner, ThreadMode
 
 pipeline = None
 align = None
+prev = 0
+now = int(time.time())
 
 
 class JobSharedRealsenseImg(JobPkgBase):
@@ -140,6 +142,14 @@ class RealsenseCapture(BusWorker):
         if not success:
             # self.m_eof = True
             return True  # also breath
+        
+        # global now, prev
+        # now = int(time.time())
+        # if now > prev + 3:
+        #     prev = now
+        #     print(int(time.time()))
+        #     cv2.imwrite(f'sample/{int(time.time())}.jpg', color_image)
+
         self.m_frame_id += 1
         finished_job = JobSharedRealsenseImg(color_image)
         finished_job.depth_image = depth_image

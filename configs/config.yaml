@@ -9,7 +9,7 @@ Develop:
 log:
   log_dir: './logs/'    # ./logs/{data_time}.txt
 
-visualization: True
+visualization: False 
 
 models:
   detect:
@@ -17,19 +17,19 @@ models:
     cuda: 0
     port: 0
     platform: pc          # pc(onnx) / rknn(rknn)
-    #    weight: 'algorithm/weights/yolov5s-det-0724-noquan.rknn'
-    weight: '/home/ycc/Jim/yolov5/models/yolov5s-det-0728.onnx'
+    weight: 'algorithm/weights/yolov5s-det-0724-noquan.rknn'
+    # weight: '/home/ycc/Jim/yolov5/models/yolov5s-det-0728.onnx'
     imgsz: 640
     obj_threshold: 0.5
-    nms_threshold: 0.5
+    nms_threshold: 0.3
 
   segment:
-    valid: True
+    valid: False 
     cuda: 0
     port: 1
     platform: pc
-    #    weight: 'algorithm/weights/yolov5n-seg-0724-noquan.rknn'
-    weight: '/home/ycc/Jim/yolov5/models/yolov5n-seg-0724.onnx'
+    weight: 'algorithm/weights/yolov5n-seg-0724-noquan.rknn'
+    # weight: '/home/ycc/Jim/yolov5/models/yolov5n-seg-0724.onnx'
     imgsz: 640
     obj_threshold: 0.7
     nms_threshold: 0.5
