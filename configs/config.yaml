@@ -9,7 +9,7 @@ Develop:
 log:
   log_dir: './logs/'    # ./logs/{data_time}.txt
 
-visualization: False 
+visualization: True  
 
 models:
   detect:
@@ -17,7 +17,7 @@ models:
     cuda: 0
     port: 0
     platform: pc          # pc(onnx) / rknn(rknn)
-    weight: 'algorithm/weights/yolov5s-det-0724-noquan.rknn'
+    weight: 'algorithm/weights/yolov5s-det-0811.rknn'
     # weight: '/home/ycc/Jim/yolov5/models/yolov5s-det-0728.onnx'
     imgsz: 640
     obj_threshold: 0.5
