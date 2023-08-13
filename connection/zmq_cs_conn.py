@@ -127,7 +127,10 @@ class ZMQCSConnection(BusWorker):
                     det_msg.x2 = loc_re[0] - self.camera_dis
                     det_msg.y2 = loc_re[1] + self.robot_length - self.shot_dis
                     det_msg.z2 = loc_re[2] - self.robot_height
-
+                    if (abs(det_msg.z2) > 0.2):
+                        print("error check, single drop ....................")
+                        det_msg.x1, det_msg.y1, det_msg.z1 = 9999, 9999, 9999
+                        det_msg.x2, det_msg.y2, det_msg.z2 = 9999, 9999, 9999
             if multi_obj:
                 c = CameraBottle2RobotReply()
                 c.error.flag = True
@@ -144,6 +147,11 @@ class ZMQCSConnection(BusWorker):
                 else:
                     img = job_data.image
                     for i in range(len(det_xyzs)):
+                        if (abs(det_xyzs[i][1]) > 0.2):
+                            #p.x1, p.y1, p.z1 = 9999, 9999, 9999
+                            #p.x2, p.y2, p.z2 = 9999, 9999, 9999
+                            print("error check, drop ....................")
+                            continue
                         c.seq = job_data.frame_id
                         c.ts = job_data.time_stamp
                         p = det_msg.poses.pose.add()
